@@ -96,6 +96,21 @@ if [[ -f "$VERSION_FILE" ]]; then
 fi
 BAKE_INIT="/opt/bake/bake.log"
 
+# --- Build run logs config ---
+LOG_ROOT="${RUN_DIR}/run-logs/${COIN_NAME}"
+BUILD_LOG="${LOG_ROOT}/build"
+BUILD_DEPENDS_LOG="${LOG_ROOT}/depends"
+
+reset_logs() {
+  local dir
+  for dir in "$@"; do
+    mkdir -p "$dir"
+    rm -f "$dir"/*.log 2>/dev/null || true
+  done
+}
+
+reset_logs "$BUILD_LOG" "$BUILD_DEPENDS_LOG"
+
 # --- Determine if first-run ---
 if [[ ! -f "$BAKE_INIT" ]]; then
     FIRST_RUN=true
@@ -117,8 +132,8 @@ EOF
     sudo apt update
     sudo apt dist-upgrade -y
     sudo apt-get install -y \
-      git curl build-essential libtool autotools-dev automake pkg-config python3 bsdmainutils cmake \
-      libdb-dev libdb++-dev screen zlib1g-dev libx11-dev libxext-dev libxrender-dev libxft-dev \
+      git curl wget build-essential libtool autotools-dev automake pkg-config python3 bsdmainutils \
+      cmake libdb-dev libdb++-dev screen zlib1g-dev libx11-dev libxext-dev libxrender-dev libxft-dev \
       libxrandr-dev libffi-dev g++-aarch64-linux-gnu g++-arm-linux-gnueabihf binutils-aarch64-linux-gnu \
       binutils-arm-linux-gnueabihf binutils-i686-linux-gnu zip unzip openssl
 else
@@ -132,8 +147,8 @@ EOF
     # System setup (subsequent runs)
     sudo apt update
     sudo apt-get install -y \
-      git curl build-essential libtool autotools-dev automake pkg-config python3 bsdmainutils cmake \
-      libdb-dev libdb++-dev screen zlib1g-dev libx11-dev libxext-dev libxrender-dev libxft-dev \
+      git curl wget build-essential libtool autotools-dev automake pkg-config python3 bsdmainutils \
+      cmake libdb-dev libdb++-dev screen zlib1g-dev libx11-dev libxext-dev libxrender-dev libxft-dev \
       libxrandr-dev libffi-dev g++-aarch64-linux-gnu g++-arm-linux-gnueabihf binutils-aarch64-linux-gnu \
       binutils-arm-linux-gnueabihf binutils-i686-linux-gnu zip unzip openssl
 fi
@@ -282,45 +297,83 @@ ensure_windows_toolchain() {
 }
 
 # --- Build a single target (Release-only) ---
+sanitize_tag() {
+  # keep only: A–Z a–z 0–9 . _ -
+  # everything else becomes "_"
+  echo "$1" | tr -cs 'A-Za-z0-9._-' '_'
+}
+
 build_target() {
   local friendly="$1" host="$2" qt="$3" is_pi="$4" is_amp="$5" is_win="$6"
   log "-*- Baking goods: ${friendly} | HOST=${host} | QT=${qt} -*-"
 
-# --- Depends clean & rebuild (honors QT=n) ---
-  pushd "$DEPENDSDIR" >/dev/null
-  make clean || true
-  make distclean || true
+  local did_push_repo=0 did_push_dep=0
+  cleanup_dirs() {
+    ((did_push_repo)) && popd >/dev/null || true
+    ((did_push_dep))  && popd >/dev/null || true
+  }
+  trap cleanup_dirs RETURN
+
+# --- tag + depends flags ---
   local depends_flags=()
   if [[ "${qt,,}" == "n" ]]; then
-	depends_flags+=(NO_QT=1)
+    depends_flags+=(NO_QT=1)
   fi
-  make -j"$(nproc)" HOST="$host" "${depends_flags[@]}"
+
+  local tag_raw="${friendly}-${host}-qt${qt}"
+  local tag
+  tag="$(sanitize_tag "$tag_raw")"
+
+# --- Depends clean & rebuild (honors QT=n) ---
+  pushd "$DEPENDSDIR" >/dev/null
+  did_push_dep=1
+  make clean || true
+  make distclean || true
+  make -j"$(nproc)" HOST="$host" "${depends_flags[@]}" 2>&1 | tee "${BUILD_DEPENDS_LOG}/${tag}.main.log" || {
+	err "depends build failed: ${friendly} (${host})"
+	return 1
+  }
+  for t in error warning fail; do
+    grep -i -C 3 "$t" "${BUILD_DEPENDS_LOG}/${tag}.main.log" \
+      > "${BUILD_DEPENDS_LOG}/${tag}.${t}.log" || true
+  done
   popd >/dev/null
+  did_push_dep=0
 
 # --- Main clean, autogen, configure, build ---
   pushd "$REPO_ROOT" >/dev/null
+  did_push_repo=1
   make clean || true
   make distclean || true
-  ./autogen.sh
+  ./autogen.sh || { err "autogen failed: ${friendly} (${host})"; return 1; }
   local cfg_flags=""
   [[ "${qt,,}" == "n" ]] && cfg_flags+=" --with-gui=no"
-  ./configure --prefix="${DEPENDSDIR}/${host}" ${cfg_flags}
-  make -j"$(nproc)"
+  ./configure --prefix="${DEPENDSDIR}/${host}" ${cfg_flags} || { err "configure failed: ${friendly} (${host})"; return 1; }
+
+  make -j"$(nproc)" 2>&1 | tee "${BUILD_LOG}/${tag}.main.log" || {
+	err "make failed: ${friendly} (${host})"
+	return 1
+  }
+
+  for t in error warning fail; do
+    grep -i -C 3 "$t" "${BUILD_LOG}/${tag}.main.log" \
+      > "${BUILD_LOG}/${tag}.${t}.log" || true
+  done
 
 # --- Determine binaries to package ---
   local binfiles=()
   if [[ "$is_win" == "true" ]]; then
     if [[ "${qt,,}" == "y" ]]; then
-	    binfiles=("${COIN_NAME}-cli.exe" "${COIN_NAME}d.exe" "qt/${COIN_NAME}-qt.exe")
-	  else
-	    binfiles=("${COIN_NAME}-cli.exe" "${COIN_NAME}d.exe")
-	  fi
+      binfiles=("${COIN_NAME}-cli.exe" "${COIN_NAME}d.exe" "qt/${COIN_NAME}-qt.exe")
+    else
+      binfiles=("${COIN_NAME}-cli.exe" "${COIN_NAME}d.exe")
+    fi
   else
-	  if [[ "${qt,,}" == "y" ]]; then
-	    binfiles=("${COIN_NAME}-cli" "${COIN_NAME}d" "qt/${COIN_NAME}-qt")
-	  else
-	    binfiles=("${COIN_NAME}-cli" "${COIN_NAME}d")
-	  fi
+    if [[ "${qt,,}" == "y" ]]; then
+      binfiles=("${COIN_NAME}-cli" "${COIN_NAME}d" "qt/${COIN_NAME}-qt")
+    else
+      binfiles=("${COIN_NAME}-cli" "${COIN_NAME}d")
+    fi
   fi
 
   local bin_subdir="${COIN_NAME}-v${VERSION}"
@@ -329,17 +382,21 @@ build_target() {
   mkdir -p "$out_dir" "$COMPRESS_DIR" "$SPECIAL_DELIVERY"
 
   for b in "${binfiles[@]}"; do
-    [[ -f "src/${b}" ]] || { err "Missing binary: src/${b}"; popd >/dev/null; return 1; }
+    [[ -f "src/${b}" ]] || { err "Missing binary: src/${b}"; return 1; }
     cp "src/${b}" "$out_dir/"
   done
 
+  popd >/dev/null
+  did_push_repo=0
+
 # --- $HOST aware Strip ---
+  local strip_tool
   case "$host" in
-    x86_64-w64-mingw32) strip_tool="x86_64-w64-mingw32-strip" ;;
-    arm-linux-gnueabihf) strip_tool="arm-linux-gnueabihf-strip" ;;
-    aarch64-linux-gnu)   strip_tool="aarch64-linux-gnu-strip" ;;
-    i686-pc-linux-gnu)   strip_tool="i686-linux-gnu-strip" ;;
-    *)                   strip_tool="strip" ;;
+    x86_64-w64-mingw32)   strip_tool="x86_64-w64-mingw32-strip" ;;
+    arm-linux-gnueabihf)  strip_tool="arm-linux-gnueabihf-strip" ;;
+    aarch64-linux-gnu)    strip_tool="aarch64-linux-gnu-strip" ;;
+    i686-pc-linux-gnu)    strip_tool="i686-linux-gnu-strip" ;;
+    *)                    strip_tool="strip" ;;
   esac
   if ! command -v "$strip_tool" >/dev/null 2>&1; then
     err "strip tool '$strip_tool' not found; using fallback 'strip'"
@@ -362,15 +419,23 @@ build_target() {
 
   if [[ "$is_win" == "true" ]]; then
     archive_name="${COIN_NAME}-Generic-${arch_label}-${RELEASE_SUFFIX}-${VERSION}.zip"
-    (cd "$BUILD_BASE" && zip -r "${COMPRESS_DIR}/${archive_name}" "$bin_subdir")
+	(cd "$BUILD_BASE" && zip -r "${COMPRESS_DIR}/${archive_name}" "$bin_subdir") || {
+	  err "zip failed: ${archive_name}"
+	  return 1
+	}
   else
     archive_name="${COIN_NAME}-${os_label}_${arch_label}-${RELEASE_SUFFIX}-${VERSION}.tar.gz"
-    (cd "$BUILD_BASE" && tar -cf - "$bin_subdir" | gzip -9 > "${COMPRESS_DIR}/${archive_name}")
+	(cd "$BUILD_BASE" && tar -cf - "$bin_subdir" | gzip -9 > "${COMPRESS_DIR}/${archive_name}") || {
+	  err "tar/gzip failed: ${archive_name}"
+	  return 1
+	}
   fi
 
-  mv -f "${COMPRESS_DIR}/${archive_name}" "$SPECIAL_DELIVERY/"
+  mv -f "${COMPRESS_DIR}/${archive_name}" "$SPECIAL_DELIVERY/" || {
+	err "move failed: ${archive_name}"
+	return 1
+  }
   log "Baked & packaged: ${SPECIAL_DELIVERY}/${archive_name}"
-  popd >/dev/null
   return 0
 }
 
