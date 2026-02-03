@@ -8,10 +8,10 @@
 </div>
 
 
-A fully automated build script for compiling [Crystal Bitoreum](https://github.com/Nikovash/bitoreum) or other forks.  
+A fully automated build script for compiling [Crystal Bitoreum](https://github.com/Nikovash/bitoreum) or other Ghostrider algo forks.  
 Supports multiple target architectures and generates stripped, not-stripped, and debug builds, each with full checksums and compressed archives.
 
-**Version:** 1.9
+**Version:** 2.0d
 
 ---
 
@@ -27,7 +27,7 @@ Supports multiple target architectures and generates stripped, not-stripped, and
   - Linux ARM_32-bit
   - Linux ARM_64-bit
   - Raspberry Pi 4+
-  - Ampere
+  - [**Oracle**] Ampere
   - Windows x86-64 Cross Compile
   - ❌ Cancel and exit
 - ✅ Fully separate debug build
