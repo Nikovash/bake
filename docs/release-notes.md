@@ -67,4 +67,13 @@
 # Version 1.9
 - `bakery.sh` now supports multi-coin building  
 - Documentation updated to reflect new repository naming  
-- `dishy.sh` usage updated for multi-coin support  
+- `dishy.sh` usage updated for multi-coin support
+
+# Version 2.0
+- `bakery.sh` now logs build information to find where a build fails
+- `refire.sh` works closer to original intent
+    - Is used with `bakery.sh` in realization of `bakery.sh` becoming `bake.sh` in future versions
+    - Allows for editing of soruce on local machine and then attempts to build
+    - Upgraded logging of the build process that mirrors `bakery.sh` 
+- `dishy.sh` usage updated for inclusion of `refire.sh` options
+    - Added -i flag to attempt to reset `bake` enviroment as close to download as possible
