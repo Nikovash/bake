@@ -135,13 +135,13 @@ rm_file_safe() {
 log "HEARD — coin: $COIN_NAME"
 log "RUN_DIR: $RUN_DIR"
 [[ "$DRYRUN" == "1" ]] && log "DRYRUN enabled — no deletions will occur."
-[[ "$INIT_MODE" == "1" ]] && log "INIT mode enabled — full wipe (fresh download state)."
+[[ "$INIT_MODE" == "1" ]] && log "INIT mode enabled — full wipe"
 
 # ---------------------------
 # INIT MODE: wipe everything
 # ---------------------------
 if [[ "$INIT_MODE" == "1" ]]; then
-  # --- Remove BUILD_DIR (fresh download state) ---
+  # --- Remove BUILD_DIR ---
   if [[ -d "$BUILD_DIR" ]]; then
     if [[ "$BUILD_DIR" == "$HOME/"* && "$BUILD_DIR" != "$HOME" && "$BUILD_DIR" != "/" ]]; then
       log "INIT: Removing build directory: $BUILD_DIR"
@@ -188,6 +188,18 @@ fi
 # ---------------------------------------
 # NORMAL MODE: clean outputs + logs, keep build
 # ---------------------------------------
+
+# --- Remove BUILD_DIR ---
+  if [[ -d "$BUILD_DIR" ]]; then
+    if [[ "$BUILD_DIR" == "$HOME/"* && "$BUILD_DIR" != "$HOME" && "$BUILD_DIR" != "/" ]]; then
+      log "Removing build directory & all files in: $BUILD_DIR"
+      rm_safe "$BUILD_DIR"
+    else
+      die "Refusing to remove unsafe path: $BUILD_DIR"
+    fi
+  else
+    log "INIT: No build directory to remove: $BUILD_DIR"
+  fi
 
 # --- Remove special-delivery folder (pinned) ---
 if [[ -d "$SPECIAL_DELIVERY_DIR" ]]; then
