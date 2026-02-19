@@ -3,25 +3,137 @@ set -Eeuo pipefail
 
 # ===========================
 # Refire (Bakery-style)
-# Usage: ./refire.sh [coin]
+# Usage: ./refire.sh [coin] [-rf <release_name_override>]
 # - Finds $HOME/<coin>-build/<coin>
 # - Rebuilds depends per enabled recipe_book.conf target
 # - Rebuilds main per enabled target
 # - Release-only builds (stripped)  [can disable via STRIP_BINARIES=0]
 # - Artifacts in ./special-delivery
 # - NO GIT operations (preserves local edits)
+#
+# -rf "some Text"  => archive "Release" segment becomes "some_text"
 # ===========================
 
 RUN_DIR="$(pwd -P)"
 LOG_FILE="${RUN_DIR}/bakery.log"
 RECIPE_BOOK="${RUN_DIR}/recipe_book.conf"
 SPECIAL_DELIVERY="${RUN_DIR}/special-delivery"
-RELEASE_SUFFIX="Release"
+RELEASE_SUFFIX_DEFAULT="Release"
+
+# --- Optional strip control (default on) ---
+STRIP_BINARIES="${STRIP_BINARIES:-1}"
 
 # --- Default coin (override by passing an arg) ---
 DEFAULT_COIN="bitoreum"
-COIN_NAME="${1:-$DEFAULT_COIN}"
+COIN_NAME=""
+RELEASE_SUFFIX="$RELEASE_SUFFIX_DEFAULT"
 
+# ---------- helpers ----------
+ts() { date "+%Y-%m-%d %H:%M:%S"; }
+
+# snake-case-ish: "Some Text" -> "some_text"
+to_release_slug() {
+  local s="${1:-}"
+  # lowercase
+  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')"
+  # non-alnum -> underscore
+  s="$(printf '%s' "$s" | sed -E 's/[^a-z0-9]+/_/g')"
+  # trim leading/trailing underscores
+  s="$(printf '%s' "$s" | sed -E 's/^_+//; s/_+$//')"
+  # collapse repeats
+  s="$(printf '%s' "$s" | sed -E 's/_+/_/g')"
+  printf '%s' "$s"
+}
+
+# ANSI color only for terminal (never in bakery.log)
+if [[ -t 1 && "${NO_COLOR:-0}" != "1" ]]; then
+  C_INFO=$'\033[1;32m'
+  C_ERR=$'\033[1;31m'
+  C_RST=$'\033[0m'
+else
+  C_INFO=""
+  C_ERR=""
+  C_RST=""
+fi
+
+log() {
+  echo -e "${C_INFO}[INFO]${C_RST}  $*"
+  printf "%s [INFO]  %s\n" "$(ts)" "$*" >> "$LOG_FILE"
+  printf "%s [INFO]  %s\n" "$(ts)" "$*" >> "$SUMMARY_LOG"
+}
+
+err() {
+  echo -e "${C_ERR}[ERROR]${C_RST} $*" >&2
+  printf "%s [ERROR] %s\n" "$(ts)" "$*" >> "$LOG_FILE"
+  printf "%s [ERROR] %s\n" "$(ts)" "$*" >> "$SUMMARY_LOG"
+}
+
+die() { err "$*"; exit 1; }
+
+usage() {
+  err "Usage: $0 [coin] [-rf <release_name_override>]"
+  err "Examples:"
+  err "  $0"
+  err "  $0 yerbas"
+  err "  $0 yerbas -rf \"some Text\""
+  err "  $0 -rf nightly yerbas"
+  exit 1
+}
+
+# ---------- arg parsing ----------
+# Allow coin and flags in either order.
+# For -rf, accept multiple words until next recognized flag or end.
+parse_args() {
+  local args=("$@")
+  local i=0
+
+  while [[ $i -lt ${#args[@]} ]]; do
+    case "${args[$i]}" in
+      -h|--help)
+        usage
+        ;;
+      -rf)
+        i=$((i+1))
+        [[ $i -lt ${#args[@]} ]] || die "-rf requires a value (e.g. -rf \"some Text\")"
+        local parts=()
+        while [[ $i -lt ${#args[@]} ]]; do
+          # stop if next token looks like a flag we recognize
+          case "${args[$i]}" in
+            -h|--help|-rf) break ;;
+          esac
+          # stop if token begins with '-' (future-proof-ish)
+          if [[ "${args[$i]}" == -* ]]; then
+            break
+          fi
+          parts+=("${args[$i]}")
+          i=$((i+1))
+        done
+        i=$((i-1)) # compensate for outer loop increment
+
+        local raw="${parts[*]}"
+        local slug
+        slug="$(to_release_slug "$raw")"
+        [[ -n "$slug" ]] || die "-rf value became empty after sanitizing; pick something like \"nightly\""
+        RELEASE_SUFFIX="$slug"
+        ;;
+      *)
+        # first non-flag token becomes coin, ignore extras (keeps behavior predictable)
+        if [[ -z "${COIN_NAME}" && "${args[$i]}" != -* ]]; then
+          COIN_NAME="${args[$i]}"
+        else
+          err "Unknown/extra argument: ${args[$i]}"
+          usage
+        fi
+        ;;
+    esac
+    i=$((i+1))
+  done
+
+  [[ -n "$COIN_NAME" ]] || COIN_NAME="$DEFAULT_COIN"
+}
+parse_args "$@"
+
+# ---------- paths ----------
 REPO_PARENT="$HOME/${COIN_NAME}-build"
 REPO_ROOT="$REPO_PARENT/${COIN_NAME}"
 DEPENDSDIR="$REPO_ROOT/depends"
@@ -40,35 +152,6 @@ SUMMARY_LOG="${LOG_ROOT}/summary.log"
 mkdir -p "$BUILD_LOG" "$BUILD_DEPENDS_LOG"
 : > "$SUMMARY_LOG"
 
-# --- ANSI color only for terminal (never in bakery.log) ---
-if [[ -t 1 && "${NO_COLOR:-0}" != "1" ]]; then
-  C_INFO=$'\033[1;32m'
-  C_ERR=$'\033[1;31m'
-  C_RST=$'\033[0m'
-else
-  C_INFO=""
-  C_ERR=""
-  C_RST=""
-fi
-
-ts() { date "+%Y-%m-%d %H:%M:%S"; }
-
-log() {
-# console (maybe colored)
-  echo -e "${C_INFO}[INFO]${C_RST}  $*"
-# file (never colored)
-  printf "%s [INFO]  %s\n" "$(ts)" "$*" >> "$LOG_FILE"
-  printf "%s [INFO]  %s\n" "$(ts)" "$*" >> "$SUMMARY_LOG"
-}
-
-err() {
-  echo -e "${C_ERR}[ERROR]${C_RST} $*" >&2
-  printf "%s [ERROR] %s\n" "$(ts)" "$*" >> "$LOG_FILE"
-  printf "%s [ERROR] %s\n" "$(ts)" "$*" >> "$SUMMARY_LOG"
-}
-
-die() { err "$*"; exit 1; }
-
 # On any error, point to logs
 on_fail() {
   local ec=$?
@@ -78,16 +161,6 @@ on_fail() {
   exit "$ec"
 }
 trap on_fail ERR
-
-# --- Optional strip control (default on) ---
-STRIP_BINARIES="${STRIP_BINARIES:-1}"
-
-usage() {
-  err "Usage: $0 [coin]"
-  err "Default coin: bitoreum"
-  err "Example: $0 yerbas"
-  exit 1
-}
 
 # --- Sanity checks ---
 [[ -d "$REPO_ROOT" ]]     || die "Repo not found: $REPO_ROOT (expected $HOME/${COIN_NAME}-build/${COIN_NAME})"
@@ -99,6 +172,7 @@ log "Repo: $REPO_ROOT"
 log "Recipe book: $RECIPE_BOOK"
 log "Delivery: $SPECIAL_DELIVERY"
 log "Run logs: $LOG_ROOT"
+log "Release suffix: ${RELEASE_SUFFIX}"
 
 # --- Default recipe_book.conf (same format as bakery) ---
 _DEFAULT_RECIPE_BOOK="$(cat <<'CONF'
@@ -155,10 +229,20 @@ map_target() {
   esac
 }
 
+# Ubuntu 18.x => Generic  (as requested)
 detect_os_label() {
-  local os; os="$(. /etc/os-release && echo "${ID}-${VERSION_ID}")"
-  [[ "$os" == "ubuntu-18.04" ]] && os="Generic-Linux"
-  echo "$os"
+  local id ver
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  id="${ID:-unknown}"
+  ver="${VERSION_ID:-unknown}"
+
+  if [[ "$id" == "ubuntu" && "$ver" =~ ^18\. ]]; then
+    echo "Generic"
+    return
+  fi
+
+  echo "${id}-${ver}"
 }
 
 arch_type_label() {
@@ -197,7 +281,7 @@ ensure_windows_toolchain() {
 }
 
 sanitize_tag() {
-# keep only: A–Z a–z 0–9 . _ -
+  # keep only: A–Z a–z 0–9 . _ -
   echo "$1" | tr -cs 'A-Za-z0-9._-' '_'
 }
 
@@ -221,6 +305,7 @@ fi
 build_target() {
   local friendly="$1" host="$2" qt="$3" is_pi="$4" is_amp="$5" is_win="$6"
   log "-*- Refiring: ${friendly} | HOST=${host} | QT=${qt} -*-"
+
   local did_push_repo=0 did_push_dep=0
   cleanup_dirs() {
     ((did_push_repo)) && popd >/dev/null || true
@@ -228,18 +313,20 @@ build_target() {
   }
   trap cleanup_dirs RETURN
 
-# Depends flags
+  # Depends flags
   local depends_flags=()
   [[ "${qt,,}" == "n" ]] && depends_flags+=(NO_QT=1)
+
   local tag_raw="${friendly}-${host}-qt${qt}"
   local tag; tag="$(sanitize_tag "$tag_raw")"
 
-# Label + output dir unique per target (prevents collisions / makes debugging easier)
   local arch_label; arch_label="$(arch_type_label "$host" "$is_pi" "$is_amp" "$is_win")"
-  local bin_subdir="${COIN_NAME}-v${VERSION}-${arch_label}"
+
+  # ---- IMPORTANT: match bakery folder naming inside archives ----
+  local bin_subdir="${COIN_NAME}-v${VERSION}"
   local out_dir="${BUILD_BASE}/${bin_subdir}"
 
-# ---- Depends clean & rebuild ----
+  # ---- Depends clean & rebuild ----
   pushd "$DEPENDSDIR" >/dev/null
   did_push_dep=1
 
@@ -254,7 +341,7 @@ build_target() {
   popd >/dev/null
   did_push_dep=0
 
-# ---- Main clean, autogen, configure, build ----
+  # ---- Main clean, autogen, configure, build ----
   pushd "$REPO_ROOT" >/dev/null
   did_push_repo=1
 
@@ -266,7 +353,7 @@ build_target() {
   local cfg_flags=()
   [[ "${qt,,}" == "n" ]] && cfg_flags+=(--with-gui=no)
 
-# Use depends config.site + explicit host (important for cross targets)
+  # Use depends config.site + explicit host (important for cross targets)
   local config_site="${DEPENDSDIR}/${host}/share/config.site"
   [[ -f "$config_site" ]] || err "CONFIG_SITE missing (${config_site}) — configure may fail for cross targets."
 
@@ -283,7 +370,7 @@ build_target() {
     grep -i -C 3 "$t" "${BUILD_LOG}/${tag}.main.log" > "${BUILD_LOG}/${tag}.${t}.log" || true
   done
 
-# ---- Determine binaries to package ----
+  # ---- Determine binaries to package ----
   local binfiles=()
   if [[ "$is_win" == "true" ]]; then
     if [[ "${qt,,}" == "y" ]]; then
@@ -309,7 +396,7 @@ build_target() {
   popd >/dev/null
   did_push_repo=0
 
-# ---- Strip (optional) ----
+  # ---- Strip (optional) ----
   if [[ "$STRIP_BINARIES" == "1" ]]; then
     local strip_tool
     case "$host" in
@@ -328,7 +415,7 @@ build_target() {
     log "STRIP_BINARIES=0 (skipping strip)"
   fi
 
-# ---- Checksums inside tree (per-build) ----
+  # ---- Checksums inside tree (per-build) ----
   local checksum_file="${out_dir}/checksums-${VERSION}.txt"
   : > "$checksum_file"
   echo "sha256sum:" >> "$checksum_file"
@@ -336,7 +423,7 @@ build_target() {
   echo "openssl-sha256:" >> "$checksum_file"
   (cd "$BUILD_BASE" && find "$bin_subdir" -type f -exec openssl dgst -sha256 -r {} \;) >> "$checksum_file" 2>/dev/null || true
 
-# ---- Archive name and compress ----
+  # ---- Archive name and compress (match bakery convention) ----
   local os_label archive_name
   os_label="$(detect_os_label)"
 

@@ -72,8 +72,12 @@
 # Version 2.0
 - `bakery.sh` now logs build information to find where a build fails
 - `refire.sh` works closer to original intent
-    - Is used with `bakery.sh` in realization of `bakery.sh` becoming `bake.sh` in future versions
+    - Is used with `bakery.sh` in realization of `bakery.sh` will become `bake.sh` in future versions
     - Allows for editing of soruce on local machine and then attempts to build
-    - Upgraded logging of the build process that mirrors `bakery.sh` 
+    - Upgraded logging of the build process that mirrors `bakery.sh`
+    - `refire.sh` now includes the ability to flag the build archive in a meaningful way IE 'Release' to 'depends_update' or 'nightly'
+    - Ability to strip or non-strip builds [SEE: Refire Usage Guide](refire-usage-guide.md)
 - `dishy.sh` usage updated for inclusion of `refire.sh` options
-    - Added -i flag to attempt to reset `bake` enviroment as close to download as possible
+    - Added -i flag to to reset `bake` enviroment as close to freshly downloaded state as possible
+- Most scripts should now include a -h flag for basic usage formats
+- 2.x will be the last version where `bakery.sh` `bake.sh` are two seperate functions, in 3x bakery.sh will become `bake.sh`
