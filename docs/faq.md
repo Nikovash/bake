@@ -2,13 +2,13 @@
 
 ---
 
-### Q: Why the name change from `build-bitoreum.sh` to `bake.sh`?
+### Q: Why the name change from `bake.sh` to `bake`?
 
 A: There are a couple of reasons, 
 
-- **B**itoreum m**ake** = `bake.sh`
+- **B**itoreum m**ake** = `bake`
 - Fewer characters to type, leading to hopefully less errors
-- Future plan to add other coins making this more a semi-universal builder
+- bake started off as a simple script, it has gotten a bit more complex these days beffiting a a stronger less complex name
 
 ### 🔧 Q: What platforms can I build for?
 
@@ -35,7 +35,7 @@ A: Crystal Bitoreum was forked from, Bitoreum, which was forked from Raptoreum, 
 A: Compressed binaries are placed in:
 
 ```bash
-~/bitoreum-build/compressed/
+../bake/special-delivery
 ```
 
 Each `.tar.gz` or `*.zip` archive includes binaries and a checksum file.
@@ -44,26 +44,17 @@ Each `.tar.gz` or `*.zip` archive includes binaries and a checksum file.
 
 ### 🔁 Q: Can I run the script multiple times?
 
-A: No, you have delete the `bitoreum-build` folder this is a bug that needs to be addressed for later use, for a simplified cleaning process we have included your very own `dishy.sh` a cleaning script that resets everything back for a clean kitchen!
+A: Yes, although in order to clean up your workspace consider running `dishy`
 
 ---
 
-### 📁 Q: What are the different build directories?
-
-- `build/bitoreum-build`: Standard release (stripped)
-- `build_debug/bitoreum-build`: Debug build (symbols included)
-- `build_not_strip/bitoreum-build`: Non-stripped release build
-
-Each gets its own compressed archive.
-
----
 
 ### 🖥️ Q: Can I run this on a VPS?
 
 A: Yes, but you may need to:
 
 - Add swap space if you have <2GB RAM
-- Reduce the number of build threads (e.g., `make -j2`)
+- We are working on adding the ability to reduce thread use as a future option
 
 ---
 
@@ -71,7 +62,7 @@ A: Yes, but you may need to:
 
 A:
 
-- Use a machine with more CPU cores (`make -j$(nproc)`)
+- Use a machine with more CPU cores
 - Ensure you’re not building inside a low-power container or VM
 - Add RAM or swap for large builds
 
@@ -79,7 +70,7 @@ A:
 
 ### 🔑 Q: Can I build with my own fork?
 
-A: Absolutely. You just need to modify the bake.sh file to add in your own GitHub repository URL. You may also need build dependancies that I do not so be aware of that!
+A: Absolutely. We have gone through great lenghts to allow this toolchain to be use with a variety of other projects
 
 ---
 
@@ -96,7 +87,7 @@ sha256sum -c checksums-<version>.txt
 
 Within the `bake` folder is a new helper, every good kitchen needs a dishy! This action is destructive, so use with caution!!!
 ```bash
-$HOME/bake/./dishy.sh [<coin-name>] # Defaults to bitoreum if no coin is passed
+../bake/./dishy [<coin-name>] [-i] # Defaults to bitoreum if no coin is passed
 ```
 ---
 

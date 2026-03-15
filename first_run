@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DRY_RUN="no"
+RETAIN_SCRIPT="no"
+
+while getopts ":dr" opt; do
+  case "${opt}" in
+    d) DRY_RUN="yes" ;;
+    r) RETAIN_SCRIPT="yes" ;;
+    *) echo "Usage: $0 [-d] [-r]" ; exit 1 ;;
+  esac
+done
+
+# --- Paths --- #
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+BAKE_OPT_ROOT="/opt/bake"
+OPT_BAKE_INFO="${BAKE_OPT_ROOT}/bake.info"
+LOCAL_KITCHEN_LIB="${SCRIPT_DIR}/assets/kitchen.lib"
+VERSION_FILE="${SCRIPT_DIR}/version.properties"
+
+log() {
+  echo "[first run] $*"
+}
+
+require_sudo() {
+  if [[ "$DRY_RUN" == "yes" ]]; then
+    return
+  fi
+
+  if [[ "$EUID" -ne 0 ]]; then
+    log "Elevating privileges for system install..."
+    exec sudo "$0" "$@"
+  fi
+}
+
+read_version() {
+  local key="$1"
+  local file="$2"
+
+  [[ -f "$file" ]] || return 1
+
+  grep -E "^${key}=" "$file" \
+    | head -n1 \
+    | cut -d= -f2-
+}
+
+BAKE_VERSION="$(read_version BAKE_VERSION "$VERSION_FILE" || echo "unknown")"
+KITCHEN_LIB_VERSION="$(read_version KITCHEN_LIB_VERSION "$LOCAL_KITCHEN_LIB" || echo "unknown")"
+
+SCRIPT_INSTALL="$SCRIPT_DIR"
+
+log "Detected install path: $SCRIPT_INSTALL"
+log "Bake version: $BAKE_VERSION"
+log "Kitchen lib version: $KITCHEN_LIB_VERSION"
+
+if [[ "$DRY_RUN" == "yes" ]]; then
+  log "[DRY RUN] Preparing simulated system runtime at $BAKE_OPT_ROOT"
+else
+  log "Preparing system runtime at $BAKE_OPT_ROOT"
+fi
+
+if [[ "$DRY_RUN" == "yes" ]]; then
+  log "[DRY RUN] Would create $BAKE_OPT_ROOT"
+else
+  require_sudo "$@"
+  mkdir -p "$BAKE_OPT_ROOT"
+fi
+
+if [[ "$DRY_RUN" == "yes" ]]; then
+  log "[DRY RUN] Would copy kitchen.lib to $BAKE_OPT_ROOT/kitchen.lib"
+else
+  log "Copying kitchen.lib"
+  cp "$LOCAL_KITCHEN_LIB" "$BAKE_OPT_ROOT/kitchen.lib"
+  chmod 644 "$BAKE_OPT_ROOT/kitchen.lib"
+fi
+
+INFO_CONTENT=$(cat <<EOF
+# Bake Toolset Information
+BAKE_VERSION=${BAKE_VERSION}
+KITCHEN_LIB_VERSION=${KITCHEN_LIB_VERSION}
+SCRIPT_INSTALL=${SCRIPT_INSTALL}
+FIRST_RUN=YES
+EOF
+)
+
+log "Writing bake.info"
+
+if [[ "$DRY_RUN" == "yes" ]]; then
+  echo
+  echo "----- bake.info -----"
+  echo "$INFO_CONTENT"
+  echo "---------------------"
+  log "Dry run complete. No changes made."
+  exit 0
+fi
+
+echo "$INFO_CONTENT" > "$OPT_BAKE_INFO"
+chmod 644 "$OPT_BAKE_INFO"
+
+log "System runtime installed."
+
+echo
+echo "----- bake.info -----"
+cat "$OPT_BAKE_INFO"
+echo "---------------------"
+
+if [[ "$RETAIN_SCRIPT" == "yes" ]]; then
+  log "Retain flag set, keeping first_run script."
+  log "First run complete."
+  exit 0
+fi
+
+log "Removing first_run installer."
+rm -- "$0"
+
+log "First run complete."

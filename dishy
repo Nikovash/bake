@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 # ===========================
 # Dishy The Kitchen Helper (dishy.sh)
-# - Usage: ./dishy.sh [-c <coin>] [-i]
+# - Usage: ./dishy [-c <coin>] [-i]
 #   -c <coin>   : set coin name (default: bitoreum)
 #   -i          : INIT mode — reset back to "fresh download" state:
 #                 deletes:
@@ -11,7 +11,6 @@ set -Eeuo pipefail
 #                   - ./special-delivery
 #                   - ./run-logs
 #                   - ./bakery.log
-#                   - ./bake_bread.log ./bake_creampie.log ./previous_bake.log
 #
 # Environment knobs (optional):
 #   DISHY_DRYRUN=1     : preview deletions (no changes)
@@ -26,7 +25,7 @@ Usage:
 
 Options:
   -c <coin>   Coin name (default: bitoreum)
-  -i          INIT mode: delete \$HOME/<coin>-build and ALL local logs (fresh state)
+  -i          INIT mode: delete \$HOME/<coin>-build and ALL local logs/artifacts (fresh state)
   -h          Show help
 
 Env:
@@ -76,11 +75,7 @@ RUN_DIR="$(pwd -P)"
 BUILD_DIR="$HOME/${COIN_NAME}-build"
 SPECIAL_DELIVERY_DIR="$RUN_DIR/special-delivery"
 LOG_ROOT="$RUN_DIR/run-logs"
-
-BAKE_BREAD_LOG="$RUN_DIR/bake_bread.log"
-BAKE_CREAMPIE_LOG="$RUN_DIR/bake_creampie.log"
 BAKERY_LOG="$RUN_DIR/bakery.log"
-PREVIOUS_BAKE_LOG="$RUN_DIR/previous_bake.log"
 
 DRYRUN="${DISHY_DRYRUN:-0}"
 KEEP_LOGS="${DISHY_KEEP_LOGS:-0}"
@@ -171,12 +166,6 @@ if [[ "$INIT_MODE" == "1" ]]; then
     log "INIT: No run-logs directory to remove: $LOG_ROOT"
   fi
 
-  # --- Remove specific logs ---
-  log "INIT: Shredding logs & wiping whiteboard, CHEF"
-  rm_file_safe "$BAKE_BREAD_LOG"
-  rm_file_safe "$BAKE_CREAMPIE_LOG"
-  rm_file_safe "$PREVIOUS_BAKE_LOG"
-
   # --- Remove bakery.log (pinned) ---
   [[ "$BAKERY_LOG" == "$RUN_DIR/bakery.log" ]] || die "Refusing unexpected bakery log path: $BAKERY_LOG"
   rm_file_safe "$BAKERY_LOG"
@@ -186,20 +175,20 @@ if [[ "$INIT_MODE" == "1" ]]; then
 fi
 
 # ---------------------------------------
-# NORMAL MODE: clean outputs + logs, keep build
+# NORMAL MODE: clean outputs + logs + build tree
 # ---------------------------------------
 
 # --- Remove BUILD_DIR ---
-  if [[ -d "$BUILD_DIR" ]]; then
-    if [[ "$BUILD_DIR" == "$HOME/"* && "$BUILD_DIR" != "$HOME" && "$BUILD_DIR" != "/" ]]; then
-      log "Removing build directory & all files in: $BUILD_DIR"
-      rm_safe "$BUILD_DIR"
-    else
-      die "Refusing to remove unsafe path: $BUILD_DIR"
-    fi
+if [[ -d "$BUILD_DIR" ]]; then
+  if [[ "$BUILD_DIR" == "$HOME/"* && "$BUILD_DIR" != "$HOME" && "$BUILD_DIR" != "/" ]]; then
+    log "Removing build directory & all files in: $BUILD_DIR"
+    rm_safe "$BUILD_DIR"
   else
-    log "INIT: No build directory to remove: $BUILD_DIR"
+    die "Refusing to remove unsafe path: $BUILD_DIR"
   fi
+else
+  log "No build directory to remove: $BUILD_DIR"
+fi
 
 # --- Remove special-delivery folder (pinned) ---
 if [[ -d "$SPECIAL_DELIVERY_DIR" ]]; then
@@ -222,12 +211,6 @@ else
     log "No run-logs directory to remove: $LOG_ROOT"
   fi
 fi
-
-# --- Remove specific logs ---
-log "Shredding logs & wiping whiteboard, CHEF"
-rm_file_safe "$BAKE_BREAD_LOG"
-rm_file_safe "$BAKE_CREAMPIE_LOG"
-rm_file_safe "$PREVIOUS_BAKE_LOG"
 
 # --- Bakery log handling: truncate (pinned) ---
 [[ "$BAKERY_LOG" == "$RUN_DIR/bakery.log" ]] || die "Refusing unexpected bakery log path: $BAKERY_LOG"

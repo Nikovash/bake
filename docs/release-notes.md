@@ -76,8 +76,21 @@
     - Allows for editing of soruce on local machine and then attempts to build
     - Upgraded logging of the build process that mirrors `bakery.sh`
     - `refire.sh` now includes the ability to flag the build archive in a meaningful way IE 'Release' to 'depends_update' or 'nightly'
-    - Ability to strip or non-strip builds [SEE: Refire Usage Guide](refire-usage-guide.md)
+    - Ability to strip or non-strip builds
 - `dishy.sh` usage updated for inclusion of `refire.sh` options
     - Added -i flag to to reset `bake` enviroment as close to freshly downloaded state as possible
 - Most scripts should now include a -h flag for basic usage formats
 - 2.x will be the last version where `bakery.sh` `bake.sh` are two seperate functions, in 3x bakery.sh will become `bake.sh`
+
+# Verison3.0rc
+- `fisrt_run` utility has been added
+- All tools have dropped the use of *.sh
+- `refire` & `bakery` have been folded into `bake` 3 tools into one
+- `childe` is a new tool that allows users to graphicaly choose Arch_type builds
+- `garnish` is a new tool that allows user to graphically chose build flags
+- `kitchen.lib` has been added to prevent massive code reusage in-line
+- `asset_pull.sh` is a special library that is desinged to maintain `kitchen.lib`
+- Documents have been rewritten
+- QT determination was moved from `recipe_book.conf` to `build_flags.list`
+- Dishy has been updated
+- This is an unstable release candidate to test on the release branch

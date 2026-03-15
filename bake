@@ -1,0 +1,637 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+# ===========================
+# Bake 
+# - Fresh bake:
+#     ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [-c] [-g] [-f] [-o] [-m <label>]
+# - Refire:
+#     ./bake -r <coin_name> [-d] [-c] [-g] [-f] [-o] [-m <label>]
+# - Uses recipe_book.conf (target matrix)
+# - Uses build_flags.list (configure / NO_QT flags)
+# - One-time repo clone/update for fresh mode
+# - Refire reuses existing local repo
+# - Cleans depends & main between bakes
+# - Release-only builds (stripped)
+# - Artifacts in special-delivery
+# - bakery.log: only [INFO]/[ERROR] entries
+# ===========================
+
+# --- Where we RUN the script from ---
+RUN_DIR="$(pwd -P)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+LOG_FILE="${RUN_DIR}/bakery.log"
+: > "$LOG_FILE"
+
+# --- Fancy coloring and treatment for log ---
+log() { echo -e "\033[1;32m[INFO]  $*\033[0m" >> "$LOG_FILE"; }
+err() {
+  echo -e "\033[1;31m[ERROR] $*\033[0m" >&2
+  echo -e "\033[1;31m[ERROR] $*\033[0m" >> "$LOG_FILE"
+}
+die() { err "$*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  Fresh bake:
+    ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [-c] [-g] [-f] [-o] [-m <label>]
+
+  Refire:
+    ./bake -r <coin_name> [-d] [-c] [-g] [-f] [-o] [-m <label>]
+
+Flags:
+  -d           Download/check only; do not build
+  -c           Run childe before build/refire
+  -g           Run garnish before build/refire
+  -f           Run both childe and garnish
+  -o           Allow Oracle Ampere ARM to honor GUI flags
+  -r           Refire mode for an already-downloaded local coin
+  -m <label>   Replace Release in archive names with a custom label
+  -h           Show this help
+EOF
+}
+
+# --- Bootstrap kitchen runtime ---
+ASSET_PULL="${SCRIPT_DIR}/assets/asset_pull.sh"
+OPT_KITCHEN_LIB="/opt/bake/kitchen.lib"
+
+[[ -f "$ASSET_PULL" ]] || die "Missing ${ASSET_PULL}"
+
+# shellcheck disable=SC1090
+source "$ASSET_PULL"
+ensure_kitchen_lib
+
+[[ -f "$OPT_KITCHEN_LIB" ]] || die "Missing ${OPT_KITCHEN_LIB}"
+
+# shellcheck disable=SC1090
+source "$OPT_KITCHEN_LIB"
+
+# --- Defaults ---
+MODE="fresh"                    # fresh | refire
+DOWNLOAD_ONLY="no"
+USE_CHILDE="no"
+USE_GARNISH="no"
+ORACLE_GUI_OVERRIDE="no"
+MOD_LABEL=""
+DEFAULT_COIN_NAME="bitoreum"
+DEFAULT_REPO_URL="https://github.com/Nikovash/bitoreum"
+COIN_NAME="$DEFAULT_COIN_NAME"
+REPO_URL="$DEFAULT_REPO_URL"
+BRANCH_OR_TAG=""
+RELEASE_SUFFIX="Release"
+
+# --- Parse CLI ---
+parse_args() {
+  local positionals=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -d) DOWNLOAD_ONLY="yes" ;;
+      -c) USE_CHILDE="yes" ;;
+      -g) USE_GARNISH="yes" ;;
+      -f) USE_CHILDE="yes"; USE_GARNISH="yes" ;;
+      -o) ORACLE_GUI_OVERRIDE="yes" ;;
+      -r) MODE="refire" ;;
+      -m)
+        shift
+        [[ $# -gt 0 ]] || die "Missing value for -m"
+        MOD_LABEL="$1"
+        ;;
+      -h|--help) usage; exit 0 ;;
+      --) shift; break ;;
+      -*) die "Unknown flag: $1" ;;
+      *) positionals+=("$1") ;;
+    esac
+    shift
+  done
+
+  [[ -n "$MOD_LABEL" ]] && RELEASE_SUFFIX="$MOD_LABEL"
+
+  if [[ "$MODE" == "refire" ]]; then
+    [[ "${#positionals[@]}" -ge 1 ]] || die "Refire mode requires a coin name: ./bake -r <coin_name>"
+    [[ "${#positionals[@]}" -le 1 ]] || die "Refire mode only accepts one positional argument: <coin_name>"
+    COIN_NAME="${positionals[0]}"
+  else
+    [[ "${#positionals[@]}" -ge 1 ]] || die "Fresh bake requires <branch_or_tag>"
+    BRANCH_OR_TAG="${positionals[0]}"
+
+    if [[ "${#positionals[@]}" -eq 2 ]]; then
+      die "If overriding defaults, both <coin_name> and <repo_url> must be provided."
+    elif [[ "${#positionals[@]}" -ge 3 ]]; then
+      COIN_NAME="${positionals[1]}"
+      REPO_URL="${positionals[2]}"
+    fi
+  fi
+}
+
+parse_args "$@"
+
+# --- Ensure dishy.sh exists; try to fetch if missing ---
+if [[ -x "${RUN_DIR}/dishy.sh" ]]; then
+  "${RUN_DIR}/dishy.sh" "$COIN_NAME" || true
+else
+  fetched=""
+  if command -v curl >/dev/null 2>&1; then
+    for ref in dev release; do
+      curl -fsSL "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy.sh" \
+        -o "${RUN_DIR}/dishy.sh" && fetched="yes" && break || true
+    done
+  elif command -v wget >/dev/null 2>&1; then
+    for ref in dev release; do
+      wget -qO "${RUN_DIR}/dishy.sh" \
+        "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy.sh" && fetched="yes" && break || true
+    done
+  fi
+
+  if [[ "${fetched:-}" == "yes" && -s "${RUN_DIR}/dishy.sh" ]]; then
+    chmod +x "${RUN_DIR}/dishy.sh"
+    "${RUN_DIR}/dishy.sh" "$COIN_NAME" || true
+  else
+    err "Required employee 'dishy.sh' did not show up..."
+    die "Aborting..."
+  fi
+fi
+
+# --- Variables derived from COIN_NAME ---
+REPO_PARENT="$HOME/${COIN_NAME}-build"
+REPO_ROOT="$REPO_PARENT/${COIN_NAME}"
+
+DEPENDSDIR="$REPO_ROOT/depends"
+BUILD_BASE="$REPO_PARENT/build"
+COMPRESS_DIR="$REPO_PARENT/compressed"
+SPECIAL_DELIVERY="$RUN_DIR/special-delivery"
+
+RECIPE_BOOK="${RUN_DIR}/recipe_book.conf"
+FLAGS_FILE="${RUN_DIR}/build_flags.list"
+
+# --- Load version from version.properties (fallback: dev) ---
+VERSION_FILE="${RUN_DIR}/version.properties"
+BAKE_VERSION="dev"
+if [[ -f "$VERSION_FILE" ]]; then
+  if grep -qE '^\s*BAKE_VERSION\s*=' "$VERSION_FILE"; then
+    # shellcheck disable=SC1090
+    source "$VERSION_FILE"
+  else
+    BAKE_VERSION="$(<"$VERSION_FILE")"
+  fi
+  BAKE_VERSION="${BAKE_VERSION//,/\.}"
+fi
+
+# --- Build info file ---
+BAKE_INFO="/opt/bake/bake.info"
+
+# --- Build run logs config ---
+LOG_ROOT="${RUN_DIR}/run-logs/${COIN_NAME}"
+BUILD_LOG="${LOG_ROOT}/build"
+BUILD_DEPENDS_LOG="${LOG_ROOT}/depends"
+
+reset_logs() {
+  local dir
+  for dir in "$@"; do
+    mkdir -p "$dir"
+    rm -f "$dir"/*.log 2>/dev/null || true
+  done
+}
+
+reset_logs "$BUILD_LOG" "$BUILD_DEPENDS_LOG"
+
+# --- Determine if first-run ---
+if [[ ! -f "$BAKE_INFO" ]]; then
+  FIRST_RUN=true
+else
+  FIRST_RUN=false
+fi
+log "First run: $FIRST_RUN"
+
+# --- System setup (kept close to OG behavior) ---
+ensure_system_packages() {
+  if [[ "$FIRST_RUN" == true ]]; then
+    log "Performing first run setup..."
+  else
+    log "Running recurring package sanity..."
+  fi
+
+  sudo mkdir -p /opt/bake
+
+  if [[ "$FIRST_RUN" == true ]]; then
+    sudo tee "$BAKE_INFO" > /dev/null <<EOF
+# Bake configuration
+BAKE_VERSION=$BAKE_VERSION
+SCRIPT_INSTALL=${RUN_DIR}
+EOF
+    log "Configuration file created at $BAKE_INFO"
+    sudo apt update
+    sudo apt dist-upgrade -y
+  else
+    sudo tee "$BAKE_INFO" > /dev/null <<EOF
+# Bake configuration
+BAKE_VERSION=$BAKE_VERSION
+SCRIPT_INSTALL=$RUN_DIR
+EOF
+    log "Bake version & Run_Dir has been updated"
+    sudo apt update
+  fi
+
+  sudo apt-get install -y \
+    git curl wget build-essential libtool autotools-dev automake pkg-config python3 bsdmainutils \
+    cmake libdb-dev libdb++-dev screen zlib1g-dev libx11-dev libxext-dev libxrender-dev libxft-dev \
+    libxrandr-dev libffi-dev g++-aarch64-linux-gnu g++-arm-linux-gnueabihf binutils-aarch64-linux-gnu \
+    binutils-arm-linux-gnueabihf binutils-i686-linux-gnu zip unzip openssl
+}
+
+# --- Install Python 3.10.17 altinstall ---
+ensure_python_altinstall() {
+  PYTHON_SRC="/usr/src/Python-3.10.17"
+  if [[ ! -d "$PYTHON_SRC" ]]; then
+    log "Installing Python 3.10.17..."
+    pushd /usr/src >/dev/null
+    [[ -f "Python-3.10.17.tgz" ]] || sudo wget https://www.python.org/ftp/python/3.10.17/Python-3.10.17.tgz
+    sudo tar -xzf Python-3.10.17.tgz
+    pushd Python-3.10.17 >/dev/null
+    sudo ./configure --enable-optimizations
+    sudo make -j"$(nproc)"
+    sudo make altinstall
+    popd >/dev/null
+    popd >/dev/null
+    log "Python 3.10.17 successfully installed"
+  else
+    log "Python 3.10.17 already installed."
+  fi
+  export PATH="$PATH:/usr/bin"
+}
+
+ensure_system_packages
+ensure_python_altinstall
+
+log "On today's menu: $COIN_NAME; Recipe submitted from - $REPO_URL"
+
+# --- bake.sh Start Time ---
+START_EPOCH="$(date +%s)"
+START_HUMAN="$(date +"%Y-%m-%d %H:%M:%S %Z")"
+log "Commercial Bake Start: ${START_HUMAN}"
+
+# --- Temp fallback for flaky depends in v4.1.0.0 ---
+if [[ "$COIN_NAME" == "bitoreum" && "$MODE" == "fresh" && "$BRANCH_OR_TAG" == "v4.1.0.0" ]]; then
+  export FALLBACK_DOWNLOAD_PATH="https://bitoreum.cc/depends/"
+  log "Applied bitoreum.cc fallback for bitoreum-v4.1.0.0"
+fi
+
+# --- Helpers from new architecture ---
+prepare_repo() {
+  mkdir -p "$REPO_PARENT"
+  if [[ -d "$REPO_ROOT/.git" ]]; then
+    log "Repo exists. Updating and checking out $BRANCH_OR_TAG..."
+    git -C "$REPO_ROOT" fetch --all --tags
+    git -C "$REPO_ROOT" checkout -f "$BRANCH_OR_TAG"
+    git -C "$REPO_ROOT" pull --rebase || true
+  else
+    log "Cloning branch/tag $BRANCH_OR_TAG..."
+    if ! git clone -b "$BRANCH_OR_TAG" "$REPO_URL" "$REPO_ROOT"; then
+      log "Branch/tag not found, cloning default then checking out $BRANCH_OR_TAG"
+      git clone "$REPO_URL" "$REPO_ROOT"
+      git -C "$REPO_ROOT" checkout -f "$BRANCH_OR_TAG"
+    fi
+  fi
+}
+
+verify_refire_repo() {
+  [[ -d "$REPO_ROOT/.git" ]] || die "Refire requested but local repo not found: $REPO_ROOT"
+  REPO_URL="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "$REPO_URL")"
+  BRANCH_OR_TAG="$(git -C "$REPO_ROOT" describe --tags --exact-match 2>/dev/null || git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
+}
+
+compute_version() {
+  if [[ -f "$REPO_ROOT/build.properties" ]]; then
+    grep '^release-version=' "$REPO_ROOT/build.properties" | cut -d'=' -f2
+  else
+    date +%Y%m%d-%H%M%S
+  fi
+}
+
+detect_os_label() {
+  local os
+  os="$(. /etc/os-release && echo "${ID}-${VERSION_ID}")"
+  [[ "$os" == "ubuntu-18.04" ]] && os="Generic-Linux"
+  echo "$os"
+}
+
+arch_type_label() {
+  local host="$1" is_pi="$2" is_amp="$3" is_win="$4"
+  if [[ "$is_pi" == "true" ]]; then
+    echo "Pi4_ARM_64"
+  elif [[ "$is_amp" == "true" ]]; then
+    echo "Oracle-Ampere_ARM_64"
+  elif [[ "$is_win" == "true" ]]; then
+    echo "Win64_x86"
+  else
+    case "$host" in
+      x86_64-pc-linux-gnu) echo "x86_64" ;;
+      i686-pc-linux-gnu)   echo "x86_32" ;;
+      arm-linux-gnueabihf) echo "ARM_32" ;;
+      aarch64-linux-gnu)   echo "ARM_64" ;;
+      *)                   echo "$host" ;;
+    esac
+  fi
+}
+
+ensure_windows_toolchain() {
+  log "Ensuring MinGW-w64 toolchain for Windows target..."
+  sudo apt-get update -y
+  sudo apt-get install -y g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 nsis
+  sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix || true
+  sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix || true
+}
+
+sanitize_tag() {
+  echo "$1" | tr -cs 'A-Za-z0-9._-' '_'
+}
+
+contains_flag() {
+  local needle="$1"
+  shift || true
+  local item
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+append_unique_flag() {
+  local -n arr_ref="$1"
+  local flag="$2"
+  contains_flag "$flag" "${arr_ref[@]}" || arr_ref+=("$flag")
+}
+
+remove_gui_flags() {
+  local -n arr_ref="$1"
+  local new_arr=()
+  local item
+  for item in "${arr_ref[@]}"; do
+    [[ "$item" == --with-gui=* ]] && continue
+    new_arr+=("$item")
+  done
+  arr_ref=("${new_arr[@]}")
+}
+
+gui_is_disabled_for_target() {
+  local -n depends_ref="$1"
+  local -n configure_ref="$2"
+  contains_flag "NO_QT=1" "${depends_ref[@]}" && return 0
+  contains_flag "--with-gui=no" "${configure_ref[@]}" && return 0
+  return 1
+}
+
+# --- Build a single target (Release-only) ---
+build_target() {
+  local friendly="$1" host="$2" is_pi="$3" is_amp="$4" is_win="$5"
+  local -n global_depends_ref="$6"
+  local -n global_configure_ref="$7"
+
+  local target_depends_flags=("${global_depends_ref[@]}")
+  local target_configure_flags=("${global_configure_ref[@]}")
+
+  if [[ "$friendly" == "Oracle Ampere ARM" && "$ORACLE_GUI_OVERRIDE" != "yes" ]]; then
+    append_unique_flag target_depends_flags "NO_QT=1"
+    remove_gui_flags target_configure_flags
+    append_unique_flag target_configure_flags "--with-gui=no"
+  fi
+
+  local gui_disabled="no"
+  if gui_is_disabled_for_target target_depends_flags target_configure_flags; then
+    gui_disabled="yes"
+  fi
+
+  log "Baking goods: ${friendly} | HOST=${host} | GUI_DISABLED=${gui_disabled}"
+
+  did_push_repo=0
+  did_push_dep=0
+  cleanup_dirs() {
+    ((did_push_repo)) && popd >/dev/null || true
+    ((did_push_dep))  && popd >/dev/null || true
+  }
+  trap cleanup_dirs RETURN
+
+  local tag_raw="${friendly}-${host}-gui${gui_disabled}"
+  local tag
+  tag="$(sanitize_tag "$tag_raw")"
+
+  # --- Depends clean & rebuild ---
+  pushd "$DEPENDSDIR" >/dev/null
+  did_push_dep=1
+  make clean || true
+  make distclean || true
+  make -j"$(nproc)" HOST="$host" "${target_depends_flags[@]}" 2>&1 | tee "${BUILD_DEPENDS_LOG}/${tag}.main.log" || {
+    err "depends build failed: ${friendly} (${host})"
+    return 1
+  }
+  for t in error warning fail; do
+    grep -i -C 3 "$t" "${BUILD_DEPENDS_LOG}/${tag}.main.log" > "${BUILD_DEPENDS_LOG}/${tag}.${t}.log" || true
+  done
+  popd >/dev/null
+  did_push_dep=0
+
+  # --- Main clean, autogen, configure, build ---
+  pushd "$REPO_ROOT" >/dev/null
+  did_push_repo=1
+  make clean || true
+  make distclean || true
+  ./autogen.sh || { err "autogen failed: ${friendly} (${host})"; return 1; }
+  ./configure --prefix="${DEPENDSDIR}/${host}" "${target_configure_flags[@]}" || {
+    err "configure failed: ${friendly} (${host})"
+    return 1
+  }
+
+  make -j"$(nproc)" 2>&1 | tee "${BUILD_LOG}/${tag}.main.log" || {
+    err "make failed: ${friendly} (${host})"
+    return 1
+  }
+
+  for t in error warning fail; do
+    grep -i -C 3 "$t" "${BUILD_LOG}/${tag}.main.log" > "${BUILD_LOG}/${tag}.${t}.log" || true
+  done
+
+  # --- Determine binaries to package ---
+  local binfiles=()
+  if [[ "$is_win" == "true" ]]; then
+    if [[ "$gui_disabled" == "yes" ]]; then
+      binfiles=("${COIN_NAME}-cli.exe" "${COIN_NAME}d.exe")
+    else
+      binfiles=("${COIN_NAME}-cli.exe" "${COIN_NAME}d.exe" "qt/${COIN_NAME}-qt.exe")
+    fi
+  else
+    if [[ "$gui_disabled" == "yes" ]]; then
+      binfiles=("${COIN_NAME}-cli" "${COIN_NAME}d")
+    else
+      binfiles=("${COIN_NAME}-cli" "${COIN_NAME}d" "qt/${COIN_NAME}-qt")
+    fi
+  fi
+
+  local bin_subdir="${COIN_NAME}-v${VERSION}"
+  local out_dir="${BUILD_BASE}/${bin_subdir}"
+
+  rm -rf "$out_dir"
+  mkdir -p "$out_dir" "$COMPRESS_DIR" "$SPECIAL_DELIVERY"
+
+  local b
+  for b in "${binfiles[@]}"; do
+    [[ -f "src/${b}" ]] || { err "Missing binary: src/${b}"; return 1; }
+    cp "src/${b}" "$out_dir/"
+  done
+
+  popd >/dev/null
+  did_push_repo=0
+
+  # --- HOST aware strip ---
+  local strip_tool
+  case "$host" in
+    x86_64-w64-mingw32)   strip_tool="x86_64-w64-mingw32-strip" ;;
+    arm-linux-gnueabihf)  strip_tool="arm-linux-gnueabihf-strip" ;;
+    aarch64-linux-gnu)    strip_tool="aarch64-linux-gnu-strip" ;;
+    i686-pc-linux-gnu)    strip_tool="i686-linux-gnu-strip" ;;
+    *)                    strip_tool="strip" ;;
+  esac
+  if ! command -v "$strip_tool" >/dev/null 2>&1; then
+    err "strip tool '$strip_tool' not found; using fallback 'strip'"
+    strip_tool="strip"
+  fi
+  "$strip_tool" "$out_dir"/* || err "strip failed (continuing)"
+
+  # --- Checksums inside tree (per-build) ---
+  local checksum_file="${out_dir}/checksums-${VERSION}.txt"
+  : > "$checksum_file"
+  echo "sha256sum:" >> "$checksum_file"
+  (cd "$BUILD_BASE" && find "$bin_subdir" -type f -exec sha256sum {} \;) >> "$checksum_file" 2>/dev/null || true
+  echo "openssl-sha256:" >> "$checksum_file"
+  (cd "$BUILD_BASE" && find "$bin_subdir" -type f -exec openssl dgst -sha256 -r {} \;) >> "$checksum_file" 2>/dev/null || true
+
+  # --- Archive name and compress ---
+  local os_label arch_label archive_name
+  os_label="$(detect_os_label)"
+  arch_label="$(arch_type_label "$host" "$is_pi" "$is_amp" "$is_win")"
+
+  if [[ "$is_win" == "true" ]]; then
+    archive_name="${COIN_NAME}-Generic-${arch_label}-${RELEASE_SUFFIX}-${VERSION}.zip"
+    (cd "$BUILD_BASE" && zip -r "${COMPRESS_DIR}/${archive_name}" "$bin_subdir") || {
+      err "zip failed: ${archive_name}"
+      return 1
+    }
+  else
+    archive_name="${COIN_NAME}-${os_label}_${arch_label}-${RELEASE_SUFFIX}-${VERSION}.tar.gz"
+    (cd "$BUILD_BASE" && tar -cf - "$bin_subdir" | gzip -9 > "${COMPRESS_DIR}/${archive_name}") || {
+      err "tar/gzip failed: ${archive_name}"
+      return 1
+    }
+  fi
+
+  mv -f "${COMPRESS_DIR}/${archive_name}" "$SPECIAL_DELIVERY/" || {
+    err "move failed: ${archive_name}"
+    return 1
+  }
+
+  log "Baked & packaged: ${SPECIAL_DELIVERY}/${archive_name}"
+  return 0
+}
+
+# --- Optional selectors ---
+if [[ "$USE_CHILDE" == "yes" ]]; then
+  log "Running childe..."
+  "${SCRIPT_DIR}/childe" || log "childe cancelled; continuing with existing or fallback recipe_book.conf"
+fi
+
+if [[ "$USE_GARNISH" == "yes" ]]; then
+  log "Running garnish..."
+  "${SCRIPT_DIR}/garnish" || log "garnish cancelled; continuing with existing or default build flags"
+fi
+
+# --- Main flow ---
+log "bake batch start"
+log "Mode: ${MODE}"
+log "Coin: ${COIN_NAME}"
+
+if [[ "$MODE" == "fresh" ]]; then
+  log "Branch/tag: ${BRANCH_OR_TAG}"
+  log "Repo URL: ${REPO_URL}"
+  ensure_recipe_ok "$RECIPE_BOOK"
+  mkdir -p "$SPECIAL_DELIVERY" "$COMPRESS_DIR" "$BUILD_BASE"
+  prepare_repo
+else
+  verify_refire_repo
+  log "Refire repo: ${REPO_ROOT}"
+  log "Detected ref: ${BRANCH_OR_TAG}"
+  log "Detected remote: ${REPO_URL}"
+  ensure_recipe_ok "$RECIPE_BOOK"
+  mkdir -p "$SPECIAL_DELIVERY" "$COMPRESS_DIR" "$BUILD_BASE"
+fi
+
+VERSION="$(compute_version)"
+if [[ -f "$REPO_ROOT/build.properties" ]]; then
+  log "Using release-version: ${VERSION}"
+else
+  log "No build.properties found; using fallback version: ${VERSION}"
+fi
+
+# --- Build flags from garnish / defaults from configure.ac if missing ---
+depends_flags=()
+configure_flags=()
+read_build_flags "$FLAGS_FILE" depends_flags configure_flags
+
+if [[ "$DOWNLOAD_ONLY" == "yes" ]]; then
+  log "Download/check-only mode complete."
+  if declare -F bake_set >/dev/null 2>&1; then
+    bake_set LAST_APP bake || true
+    bake_set LAST_RUN "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" || true
+    bake_set LAST_BRANCH_OR_TAG "$BRANCH_OR_TAG" || true
+    bake_set LAST_COIN_NAME "$COIN_NAME" || true
+    bake_set LAST_REPO_URL "$REPO_URL" || true
+    bake_set LAST_REPO_ROOT "$REPO_ROOT" || true
+    bake_set LAST_BUILD_MODE "${MODE}-download-only" || true
+  fi
+  exit 0
+fi
+
+# --- Install Windows toolchain once if any Windows target is enabled ---
+if grep -E '^Windows 64-bit,y$' "$RECIPE_BOOK" >/dev/null 2>&1; then
+  ensure_windows_toolchain
+fi
+
+# --- Build loop ---
+while IFS= read -r friendly; do
+  read host is_pi is_amp is_win <<<"$(map_target "$friendly")"
+  [[ "$host" == "unknown" ]] && { err "Skipping unknown: $friendly"; continue; }
+  build_target "$friendly" "$host" "$is_pi" "$is_amp" "$is_win" depends_flags configure_flags || {
+    err "Build failed for ${friendly}; aborting."
+    break
+  }
+done < <(read_enabled_recipe_targets "$RECIPE_BOOK")
+
+# --- Final global checksums (for everything in special-delivery) ---
+GLOBAL_SUM="${SPECIAL_DELIVERY}/checksums-${VERSION}.txt"
+: > "$GLOBAL_SUM"
+shopt -s nullglob
+for f in "${SPECIAL_DELIVERY}"/*.tar.gz "${SPECIAL_DELIVERY}"/*.zip; do
+  [[ -e "$f" ]] || continue
+  echo "sha256sum: $(sha256sum "$f")" >> "$GLOBAL_SUM" || err "sha256sum failed for $f"
+  echo "openssl-sha256: $(openssl dgst -sha256 -r "$f")" >> "$GLOBAL_SUM" || err "openssl sha256 failed for $f"
+done
+log "Wrote global checksums -> ${GLOBAL_SUM}"
+
+# --- Update bake.info runtime state --- #
+if declare -F bake_set >/dev/null 2>&1; then
+  bake_set LAST_APP bake || true
+  bake_set LAST_RUN "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" || true
+  bake_set LAST_BRANCH_OR_TAG "$BRANCH_OR_TAG" || true
+  bake_set LAST_COIN_NAME "$COIN_NAME" || true
+  bake_set LAST_REPO_URL "$REPO_URL" || true
+  bake_set LAST_REPO_ROOT "$REPO_ROOT" || true
+  bake_set LAST_BUILD_MODE "${MODE}-build" || true
+fi
+
+# --- Timestamps (end) --- #
+END_EPOCH="$(date +%s)"
+END_HUMAN="$(date +"%Y-%m-%d %H:%M:%S %Z")"
+RUNTIME=$((END_EPOCH-START_EPOCH))
+printf -v RUNTIME_HMS '%02d:%02d:%02d' $((RUNTIME/3600)) $(((RUNTIME%3600)/60)) $((RUNTIME%60))
+log "Commercial Bake End:   ${END_HUMAN}"
+log "Total Kitchen Runtime: ${RUNTIME_HMS}"
+log "Batch of Baked Goods Complete. Artifacts in ${SPECIAL_DELIVERY}"

@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+
+###########################
+# Kitchen Library Version #
+###########################
+
+KITCHEN_LIB_VERSION="1.0.0"
+
+########################
+# System Install Paths #
+########################
+
+BAKE_OPT_ROOT="/opt/bake"
+OPT_BAKE_INFO="${BAKE_OPT_ROOT}/bake.info"
+OPT_KITCHEN_LIB="${BAKE_OPT_ROOT}/kitchen.lib"
+
+######################
+# Target Definitions #
+######################
+
+ALL_RECIPE_TARGETS=(
+  "Linux 64-bit"
+  "Linux 32-bit"
+  "Linux ARM 32-bit"
+  "Linux ARM 64-bit"
+  "Raspberry Pi 4+"
+  "Oracle Ampere ARM"
+  "Windows 64-bit"
+)
+
+##################
+# Host Detection #
+##################
+
+detect_default_friendly_target() {
+
+  local arch
+  arch="$(uname -m)"
+
+  case "$arch" in
+
+    x86_64|amd64)
+      echo "Linux 64-bit"
+      ;;
+
+    i386|i486|i586|i686)
+      echo "Linux 32-bit"
+      ;;
+
+    armv7l|armv7*|armhf)
+      echo "Linux ARM 32-bit"
+      ;;
+
+    aarch64|arm64)
+
+      if grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+        echo "Raspberry Pi 4+"
+
+      elif [[ -r /sys/class/dmi/id/product_name ]] \
+        && grep -qi "ampere" /sys/class/dmi/id/product_name 2>/dev/null; then
+        echo "Oracle Ampere ARM"
+
+      else
+        echo "Linux ARM 64-bit"
+      fi
+      ;;
+
+    *)
+      echo "Linux 64-bit"
+      ;;
+  esac
+}
+
+#####################
+# Target Validation #
+#####################
+
+is_known_recipe_target() {
+
+  local target="$1"
+  local known
+
+  for known in "${ALL_RECIPE_TARGETS[@]}"; do
+    [[ "$target" == "$known" ]] && return 0
+  done
+
+  return 1
+}
+
+##################
+# Target Mapping #
+##################
+
+map_target() {
+
+  case "$1" in
+
+    "Linux 64-bit")
+      echo "x86_64-pc-linux-gnu false false false"
+      ;;
+
+    "Linux 32-bit")
+      echo "i686-pc-linux-gnu false false false"
+      ;;
+
+    "Linux ARM 32-bit")
+      echo "arm-linux-gnueabihf false false false"
+      ;;
+
+    "Linux ARM 64-bit")
+      echo "aarch64-linux-gnu false false false"
+      ;;
+
+    "Raspberry Pi 4+")
+      echo "aarch64-linux-gnu true false false"
+      ;;
+
+    "Oracle Ampere ARM")
+      echo "aarch64-linux-gnu false true false"
+      ;;
+
+    "Windows 64-bit")
+      echo "x86_64-w64-mingw32 false false true"
+      ;;
+
+    *)
+      echo "unknown false false false"
+      ;;
+  esac
+}
+
+##################
+# Recipe Helpers #
+##################
+
+write_host_only_recipe_book() {
+
+  local recipe_book="$1"
+  local host_target
+  local target
+
+  host_target="$(detect_default_friendly_target)"
+
+  : > "$recipe_book"
+
+  for target in "${ALL_RECIPE_TARGETS[@]}"; do
+
+    if [[ "$target" == "$host_target" ]]; then
+      echo "${target},y" >> "$recipe_book"
+    else
+      echo "${target},n" >> "$recipe_book"
+    fi
+
+  done
+}
+
+valid_recipe_line() {
+
+  local line="$1"
+  local target enabled
+
+  IFS=',' read -r target enabled <<< "$line" || return 1
+
+  [[ -n "$target" ]] || return 1
+  [[ "$enabled" == "y" || "$enabled" == "n" ]] || return 1
+
+  is_known_recipe_target "$target"
+}
+
+ensure_recipe_ok() {
+
+  local recipe_book="$1"
+  local ok=true
+  local line
+
+  if [[ ! -f "$recipe_book" ]]; then
+    write_host_only_recipe_book "$recipe_book"
+    return
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+    valid_recipe_line "$line" || { ok=false; break; }
+
+  done < "$recipe_book"
+
+  if ! $ok; then
+    write_host_only_recipe_book "$recipe_book"
+  fi
+}
+
+read_enabled_recipe_targets() {
+
+  local recipe_book="$1"
+  local line target enabled
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+    IFS=',' read -r target enabled <<< "$line" || continue
+
+    [[ "$enabled" == "y" ]] || continue
+    is_known_recipe_target "$target" || continue
+
+    echo "$target"
+
+  done < "$recipe_book"
+}
+
+#########################
+# Build Flag(s) Parsing #
+#########################
+
+read_build_flags() {
+
+  local flags_file="$1"
+  local -n _depends_ref="$2"
+  local -n _configure_ref="$3"
+
+  local line
+  local first_real_line_seen=0
+
+  _depends_ref=()
+  _configure_ref=()
+
+  [[ -f "$flags_file" ]] || return
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+    if [[ $first_real_line_seen -eq 0 ]]; then
+
+      first_real_line_seen=1
+
+      if [[ "$line" == "NO_QT=1" ]]; then
+        _depends_ref+=("NO_QT=1")
+        continue
+      fi
+
+    fi
+
+    [[ "$line" == --* ]] || continue
+
+    _configure_ref+=("$line")
+
+  done < "$flags_file"
+}
+
+build_flags_disable_gui() {
+
+  local flags_file="$1"
+  local first_real_line
+
+  [[ -f "$flags_file" ]] || return 1
+
+  first_real_line="$(grep -vE '^[[:space:]]*(#|$)' "$flags_file" | head -n1 || true)"
+
+  [[ "$first_real_line" == "NO_QT=1" ]]
+}
+
+#####################
+# bake.info helpers #
+#####################
+
+bake_info_exists() {
+  [[ -f "$OPT_BAKE_INFO" ]]
+}
+
+bake_get() {
+
+  local key="$1"
+
+  [[ -f "$OPT_BAKE_INFO" ]] || return 1
+
+  grep -E "^${key}=" "$OPT_BAKE_INFO" | head -n1 | cut -d= -f2-
+}
+
+bake_set() {
+
+  local key="$1"
+  local value="$2"
+
+  sudo touch "$OPT_BAKE_INFO"
+
+  if grep -qE "^${key}=" "$OPT_BAKE_INFO"; then
+
+    sudo sed -i "s|^${key}=.*|${key}=${value}|" "$OPT_BAKE_INFO"
+
+  else
+
+    echo "${key}=${value}" | sudo tee -a "$OPT_BAKE_INFO" >/dev/null
+
+  fi
+}
+
+###################
+# Install Helpers #
+###################
+
+bake_is_initialized() {
+
+  [[ -f "$OPT_BAKE_INFO" && -f "$OPT_KITCHEN_LIB" ]]
+}
+
+bake_log_version() {
+  bake_get BAKE_VERSION
+}
+
+bake_log_kitchen_version() {
+  bake_get KITCHEN_LIB_VERSION
+}
+
+bake_log_script_install() {
+  bake_get SCRIPT_INSTALL
+}
+
+kitchen_lib_self_version() {
+  echo "${KITCHEN_LIB_VERSION}"
+}
+
+##################
+# Upgrade Helper #
+##################
+
+kitchen_auto_upgrade() {
+
+  local repo_lib="${RUN_DIR}/assets/kitchen.lib"
+
+  [[ -f "$repo_lib" ]] || return
+
+  local repo_ver
+  repo_ver="$(grep '^KITCHEN_LIB_VERSION=' "$repo_lib" | cut -d= -f2 | tr -d '"')"
+
+  local sys_ver
+  sys_ver="$(bake_get KITCHEN_LIB_VERSION 2>/dev/null || echo "")"
+
+  if [[ "$repo_ver" != "$sys_ver" ]]; then
+    echo "[Bake] Updating system kitchen.lib → ${repo_ver}"
+    sudo cp "$repo_lib" "$OPT_KITCHEN_LIB"
+    bake_set KITCHEN_LIB_VERSION "$repo_ver"
+  fi
+}
