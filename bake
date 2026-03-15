@@ -127,28 +127,29 @@ parse_args() {
 
 parse_args "$@"
 
-# --- Ensure dishy.sh exists; try to fetch if missing ---
-if [[ -x "${RUN_DIR}/dishy.sh" ]]; then
-  "${RUN_DIR}/dishy.sh" "$COIN_NAME" || true
+
+# --- Ensure dishy exists; try to fetch if missing ---
+if [[ -x "${RUN_DIR}/dishy" ]]; then
+  "${RUN_DIR}/dishy" "$COIN_NAME" || true
 else
   fetched=""
   if command -v curl >/dev/null 2>&1; then
     for ref in dev release; do
-      curl -fsSL "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy.sh" \
-        -o "${RUN_DIR}/dishy.sh" && fetched="yes" && break || true
+      curl -fsSL "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy" \
+        -o "${RUN_DIR}/dishy" && fetched="yes" && break || true
     done
   elif command -v wget >/dev/null 2>&1; then
     for ref in dev release; do
-      wget -qO "${RUN_DIR}/dishy.sh" \
-        "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy.sh" && fetched="yes" && break || true
+      wget -qO "${RUN_DIR}/dishy" \
+        "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy" && fetched="yes" && break || true
     done
   fi
 
-  if [[ "${fetched:-}" == "yes" && -s "${RUN_DIR}/dishy.sh" ]]; then
-    chmod +x "${RUN_DIR}/dishy.sh"
-    "${RUN_DIR}/dishy.sh" "$COIN_NAME" || true
+  if [[ "${fetched:-}" == "yes" && -s "${RUN_DIR}/dishy" ]]; then
+    chmod +x "${RUN_DIR}/dishy"
+    "${RUN_DIR}/dishy" "$COIN_NAME" || true
   else
-    err "Required employee 'dishy.sh' did not show up..."
+    err "Required employee 'dishy' did not show up..."
     die "Aborting..."
   fi
 fi
