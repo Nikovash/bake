@@ -127,6 +127,7 @@ parse_args() {
 
 parse_args "$@"
 
+
 # --- Ensure dishy exists; try to fetch if missing ---
 if [[ -x "${RUN_DIR}/dishy" ]]; then
   "${RUN_DIR}/dishy" "$COIN_NAME" || true
