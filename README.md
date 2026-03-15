@@ -3,40 +3,209 @@
 </p>
 
 <div align="center">
-<h1>Bake - The Bitoreum Maker<br /></h1>
-<h3>(formerly 1-click compiler)</h3>
+<h1>Bake</h1>
+  <h2>The Kitchen For Crypto Compiling</h2>
+  <img src="https://img.shields.io/badge/version-3.0rc-blue">
+  <img src="https://img.shields.io/badge/platform-linux-green">
+  <img src="https://img.shields.io/badge/license-MIT-purple">
+  <img src="https://img.shields.io/badge/status-active-success">
 </div>
+<p></p>
 
+Bake is a **modular cryptocurrency compile from source system** designed to produce
+**repeatable, deterministic multi‑target builds** for core wallets and related software.
 
-A fully automated build script for compiling [Crystal Bitoreum](https://github.com/Nikovash/bitoreum) or other forks.  
-Supports multiple target architectures and generates stripped, not-stripped, and debug builds, each with full checksums and compressed archives.
+Originally created for {Crystal} **Bitoreum**, **bake** now supports compiling
+**any compatible repository** with minimal configuration.
 
-**Version:** 1.9
+The system automates:
 
----
+- Dependency installation
+- Architecture targeting
+- Build configuration
+- Packaging and checksums
+- Logging and diagnostics
 
-## 🚀 Features
+Bake focuses on **transparency, reproducibility, and modular tooling**
 
-- ✅ System `update` & `upgrade`
-- ✅ Dependency check & `install`
-- ✅ Python 3.10.17 setup (if missing)
-- ✅ Clone from `main` or custom branch
-- ✅ Platform selection:
-  - Linux x86_64-bit
-  - Linux x86_32-bit
-  - Linux ARM_32-bit
-  - Linux ARM_64-bit
-  - Raspberry Pi 4+
-  - Ampere
-  - Windows x86-64 Cross Compile
-  - ❌ Cancel and exit
-- ✅ Fully separate debug build
-- ✅ Stripped and unstripped binaries
-- ✅ Per-build and archive-level SHA + OpenSSL-style checksums
-- ✅ `*.tar.gz` compression For Linux (max level)
-- ✅ `*.zip` compression For Windows (max level)
+# Bake Toolchain
 
----
+Bake operates as a collection of specialized tools.
+
+  |Tool            | Role |
+  |----------------|-------------------------------------|
+  | **first_run**  |Environment Initialization |
+  | **bake**       | Main build Operation |
+  | **childe**     | Architecture Target Selection |
+  | **garnish**    | Build flag configuration |
+  | **dishy**      | Workspace cleaning tool |
+  | **asset_pull.sh** | Self‑healing runtime asset assist |
+  | **kitchen.lib** | Shared runtime library |
+
+While Each tool can perform a **single well‑defined task**, the user can and should use them
+in conjuction with each other to create a seemless build pipeline, while keeping the system
+easy to debug and extend.
+
+# Build Pipeline
+
+    git repo
+       │
+       ▼
+    bake
+       │
+       ├── first_run (initial setup)
+       │
+       ├── asset_pull
+       │
+       ├── childe (select targets)
+       │
+       ├── garnish (set build flags)
+       │
+       ▼
+    dependency build
+       │
+       ▼
+    configure / compile
+       │
+       ▼
+    artifact packaging
+       │
+       ▼
+    checksums + compressed archives
+
+# ✨ Features
+
+-   Deterministic build environment
+-   Multi‑architecture builds
+-   Optional GUI wallet compilation (QT)
+-   Automatic dependency installation
+-   Self‑healing runtime assets
+-   Structured logging
+-   Build artifact packaging
+-   Checksum generation
+-   Workspace reset utilities
+
+# Supported Targets
+
+Bake supports building for:
+
+-   Linux x86_64
+-   Linux x86
+-   Linux ARM64
+-   Linux ARMv7
+-   Raspberry Pi
+-   Oracle Ampere ARM
+-   Windows x86_64 (cross‑compile)
+
+Target selection is handled through **childe**
+
+# Instilation & Initial Setup
+### 1. Install git
+Some distros do not install this by default and it is required
+```bash
+sudo apt update
+sudo apt install -y git
+```
+
+### 2. Clone bake
+```bash
+git clone https://github.com/Nikovash/bake.git
+cd bake
+```
+
+### 3. Run `first_run`
+```bash
+./first_run
+```
+The `first_run` will:
+- Initilize the **bake** runtime environment
+- Install the bake libraries
+- Prepare the workspace
+- Self-destruct on sucessful completion, this is by design
+
+### [optional] 4. Optional Installs
+**bake** utilizes a few dependencies that like `git` are not always included with every distro they are:
+```bash
+sudo apt install -y whiptail
+```
+AND 
+```bash
+sudp apt install -y dialog
+```
+# Basic Usage
+### Building a project
+
+The **bake** environemnt has always bee centered around easy and minimal input ease of use. However, over time the need for both simple and complex use cases has arrisin and this toolchain now accomidates many uses. The most basic of use to create a compiled from source version of Bitoreum follows this baic pattern:
+`./bake <branch-or-tag>` selevitng any valid branch or tag from the Nikovash/bitoreum repo will start building right away. Example:
+```bash
+./bake v4.1.0.0
+```
+This command will default to building Bitoreum version 4.1.0.0 with all the standard build options set in the `makefile` and `configure.ac`. thes can be overridden and are discussed in andvanced usage later.
+
+You can also use this software to build other projects as well with a few other additions to the basic command:
+```bash
+./bake <version-or-tag> [<coin-name> <github-repo-url>
+```
+```bash
+./bake v3.1.4.20 yerbas https://github.com/The-Yerbas-Endeavor/Yerbas
+```
+For example, whould attempt to build from sournce the Yerbas coin of version 3.1.4.20. Optional flags listed below work for this usage as well.
+
+Full optional flags
+```bash
+./bake <version-or-tag> [<coin-name> <Github-Repo-URL>] [-d] [-c] [-g] [-f] [-h]
+```
+### -d
+Only Downloads the source from Github Repo
+
+### -c
+Runs the **childe** tool and allows you to select targets for building. Some cross compile headers may be requried for your specific distro/kernel that is outside the scope of this document.
+
+### -g
+Runs the **garnish** tool and allows you to select from a human readable list flages that would apply toe the ./configure step of the build. Once this list is built it is persistant until you hange it or delete the file. Then the default flags from `configure.ac` are used.
+
+### -f
+Full options, runs both the **childe** & **garnish** tool
+
+### -h
+displays a bit of help and usage syntax
+
+# Cleaning the Kitchen
+
+Use **Dishy** to clean the workspace.
+
+Standard cleanup:
+```bash
+./dishy
+```
+Reset everything to a fresh download state:
+```bash
+./dishy -i
+```
+Dishy will default to bitoreum, if you want to use Dishy on other coins you have downloaded just pass the coin name:
+```bash
+./dishy <coin-name> [-i]
+```
+# 📜 Logging
+
+Bake produces structured logs for troubleshooting
+## Primary log locations:
+    bakery.log
+    run-logs/
+
+Logs include:
+- Dependency builds
+- Compile output
+- Packaging stages
+
+# Contributing
+
+Pull requests and issues are welcome!
+Guidelines:
+- Maintain modular structure
+- Document new flags
+- Keep scripts readable
+- Preserve deterministic builds
 
 ## 📦 Requirements
 
@@ -44,62 +213,5 @@ Supports multiple target architectures and generates stripped, not-stripped, and
 - `sudo` privileges
 - Internet connection
 - Optional: `screen` (for remote session safety)
-
----
-
-## 📥 Usage
-
-### 🔹 1. install git
-Some distros do not install this by default
-```bash
-sudo apt update
-sudo apt install git -y
-```
-
-### 🔹 2. Clone and prepare
-```bash
-git clone https://github.com/Nikovash/bake.git
-cd bake
-(chmod +x bake.sh) // Optional now is shipped with executable enabled by default
-```
-Launch a screen (Optional but recommended):
-```bash
-screen -S build
-```
-Once insides the screen we can now run the app:
-```bash
-./bake.sh
-```
-On first run the app will update your system and install the bare minimum system packages for use. Optional packages for cross compiling are beyond the scope of this document. Come find me I can probably help you!
-
-Once the system is updated python 3.10.17 will be made an `altinstall`, this is sometimes a requirement of two of the dependancies used. this installs it along side your systems python not as a replacement for it so nothing breaks!
-
-Once this is done, you be asked for a branch to `bake` from the default is `main`, though that is not the current release. You can pick from any branch releases will have a `v` in front of them. As an example, at the time of this writing, the current release would be branch `v4.1.0.0`.
-
-One a valid branch is selected you will be asked if you want to include QT, which is the GUI wallet, not everyone needs or wants it, and it is incredibly resource heavy. So now if you now need it you can shave a lot of time off your build by not building for it!
-
-That is it, unless there is an error, which normally only happens when cross compiling, the script will run and at the end you will have three version in two formats:
-- Build (release)
-- Not-Stripe
-- Debug
-
-All of which will be uncompressed in their respective folder found at `~/bitoreum-build` and the compressed version found in `~/bitoreum-build/compressed` all with checksums.
-
-You can tail the less critical and noisy logging of this script by tailing the file created called `bake_bread.log`
-```bash
-tail -f bake_bread.log
-```
-You can disconnect the screen at any time by pressing:
-```bash
-CNTL+A then D
-```
-And reconnect at any time with:
-```bash
-screen -r
-```
-If this is a remote session and the screen is still attached to a screen that was from a dropped connection you can force detach and reattach it to your current session with:
-```bash
-screen -D -r
-```
-
-<p align="center">* Screen changed from automatic to manual usage, due to weird behavior on older Distros</p>
+- git
+- [whiptail and/or dialog]

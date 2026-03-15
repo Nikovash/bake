@@ -1,7 +1,10 @@
-Linux 64-bit,y,QT=y
-Linux 32-bit,y,QT=y
-Linux ARM 32-bit,y,QT=y
-Linux ARM 64-bit,y,QT=y
-Raspberry Pi 4+,n,QT=y
-Oracle Ampere ARM,n,QT=n
-Windows 64-bit,y,QT=y
+# This is a sample for refference ther format is Arch Target seperated by a comma and a y|n for if the build process will attempt other targets
+# Further headers may be required for cross-compile depending our your Distro, this is outside the scope of this toolset
+
+Linux 64-bit,y
+Linux 32-bit,y
+Linux ARM 32-bit,y
+Linux ARM 64-bit,y
+Raspberry Pi 4+,n
+Oracle Ampere ARM,n
+Windows 64-bit,y
