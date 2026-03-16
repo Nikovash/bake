@@ -1,0 +1,17 @@
+# This is a sample for refference
+# Any standard flage from the configure.ac file can be added here
+# Currently garnish only supports a handful of user popular options
+# NO_QT=1 must be first if present (no GUI build in the depends)
+# All remaining lines are configureable flags
+
+NO_QT=1
+--with-gui=no
+--enable-miner
+--enable-tests
+--enable-bench
+--enable-debug
+--enable-hardening
+--enable-reduce-exports
+--enable-zmq
+--enable-stacktraces
+--enable-crash-hooks

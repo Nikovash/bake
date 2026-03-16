@@ -1,117 +1,194 @@
 # 🛠️ Troubleshooting
 
-This guide helps you diagnose and fix issues when running the `build-bitoreum.sh` script.
+This guide helps diagnose and resolve common issues when using the **Bake build toolchain**.
+
+If a build fails, the most important step is to **check the logs first**. Bake provides structured logging to help identify problems quickly.
 
 ---
 
-## 🚫 Common Problems & Fixes
+# 🚫 Common Problems & Fixes
 
-### ❓ Nothing happens after running the script
+## Nothing happens after running Bake
 
-- Make sure the script is executable:
-  ```bash
-  chmod +x bake.sh
-  ```
-- Ensure you're using `./bake.sh` to run it (not just `bake.sh`).
-
----
-
-### 🧱 Build Fails Midway
-
-- Look for output like:
-  ```
-  make[2]: *** [target] Error
-  ```
-- Scroll up for the first error message.
-- Check `build.log` and `config.log` for detailed failure reasons.
-
----
-
-### 🔐 Permission Denied
-
-- If you see `Permission denied`:
-  - Ensure you’re in a user-writable directory (like your home folder).
-  - Do not run the entire script with `sudo` — only the system install steps use it internally.
-
----
-
-### ⚠️ “Missing binaries” or “Skipping compression” errors
-
-- This means the expected binary files were not created.
-- Possible causes:
-  - A build error occurred, but you missed it (check `build.log`)
-  - `strip` was run before binaries were placed (unlikely in recent versions)
-
-Check inside:
+Ensure the script is executable:
 
 ```bash
-~/bitoreum-build/build/bitoreum-build
+chmod +x bake
 ```
 
-If that folder is empty, the build did not succeed.
-
----
-
-### 🧪 "configure: error: Something failed"
-
-- This means a required dependency is missing or not found.
-- Review the lines above the error.
-- You may need to install missing `-dev` packages manually.
-
----
-
-### 🔁 Rebuilding After Failure
-
-If a build fails OR you want to start over, use `dishy.sh`:
-```bash
-$HOME/bake/./dishy.sh
-```
-
----
-
-### 🧵 Not Enough RAM / System Freezes
-
-If you’re on a small VPS or embedded system:
-
-- Add swap space:
-  ```bash
-  sudo fallocate -l 4G /swapfile
-  sudo chmod 600 /swapfile
-  sudo mkswap /swapfile
-  sudo swapon /swapfile
-  ```
-- Reduce `make` threads:
-  ```bash
-  make -j2
-  ```
-
----
-
-### 📜 Log Files
-
-All major build stages are logged:
-
-- `build.log` — Release build output
-- `build_debug.log` — Debug build output
-- `config.log` — Release config output
-- `config_debug.log` — Debug config output
-
-Use `less` or `grep` to find problems:
+Run Bake using:
 
 ```bash
-less build.log
-grep error build_debug.log
+./bake <branch-or-tag>
 ```
+
+Do not attempt to run the script without `./`
 
 ---
 
-## 📬 Still Stuck?
+## Build Fails Midway
 
-- Open an issue on GitHub:  
-  [https://github.com/Nikovash/bake/issues](https://github.com/Nikovash/bake/issues)
-- Include:
-  - Your OS and architecture
-  - A copy of the error output
-  - Any relevant log files
+Look for output similar to:
 
-We'll help you get up and building!
+```
+make[2]: *** [target] Error
+```
+
+When this happens:
+
+1. Scroll **upward** to find the **first error message**.
+2. That error is usually the real cause of the failure.
+
+You should also inspect Bake logs:
+
+```
+../bake/bakery.log
+../bake/run-logs/
+```
+
+These logs contain detailed output from dependency compilation, configuration, and build stages.
+
+---
+
+## Permission Denied
+
+If you encounter a `Permission denied` error:
+
+- Ensure you are working inside a **user-writable directory** (such as your home directory).
+- Do **not run Bake entirely with `sudo`**.
+
+Bake internally uses `sudo` only for steps that require system-level installation.
+
+---
+
+## Configure Errors
+
+Errors such as:
+
+```
+configure: error: something failed
+```
+
+usually indicate **missing development dependencies**.
+
+Check the lines immediately above the error message to determine which dependency is missing.
+
+Typical missing packages include:
+
+- development libraries (`*-dev`)
+- cross-compile headers
+- architecture-specific toolchains
+
+Some cross-compilation environments may require additional packages depending on your Linux distribution.
+
+---
+
+## Missing Binaries After Build
+
+If Bake finishes but no binaries appear in the final archive:
+
+Check the delivery folder:
+
+```
+../bake/special-delivery/
+```
+
+If the directory is empty, the build likely failed earlier during compilation.
+
+Review:
+
+```
+..bake/run-logs/
+../bake/bakery.log
+```
+
+to locate the first error.
+
+---
+
+## Rebuilding After Failure
+
+If a build fails and you want to reset the workspace, use **Dishy**:
+
+```bash
+./dishy
+```
+
+To reset the workspace to a **fresh download state**:
+
+```bash
+./dishy -i
+```
+
+⚠️ The `-i` option removes build artifacts and downloaded source directories.
+
+---
+
+## Not Enough RAM / System Freezes
+
+Large builds can consume significant RAM.
+
+If you are building on a small VPS or embedded system:
+
+### Add swap space
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+
+### Use fewer build threads
+
+Some systems may struggle with high parallel builds.
+
+You can limit build threads by modifying your environment before running Bake:
+
+```
+export MAKEFLAGS="-j2"
+```
+
+Lower values reduce memory usage but increase compile time. Future version will likelt have a thread flag, for now this is not the case.
+
+---
+
+# 📜 Logs
+
+Bake generates structured logs to help diagnose failures.
+
+Primary locations:
+
+```
+../bake/bakery.log
+../bake/run-logs/
+```
+
+Logs may include:
+
+- dependency compilation output
+- configure stage output
+- compiler output
+- packaging stages
+
+Always include relevant logs when reporting issues.
+
+---
+
+# 📬 Still Stuck?
+
+If you cannot resolve the issue:
+
+Open an issue on GitHub:
+
+https://github.com/Nikovash/bake/issues
+
+Please include:
+
+- Your **Linux distribution**
+- Your **CPU architecture**
+- The **Bake command used**
+- Relevant **error output**
+- Any relevant **log files**
+
+This information helps diagnose problems much faster.
