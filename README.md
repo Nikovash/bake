@@ -18,8 +18,6 @@ Bake focuses on **ease of use, deterministic builds, and modular tooling**, allo
 
 Originally developed for {Crystal} Bitoreum, `bake` (**b**itoreum m**ake**), can also be used to compile other compatible blockchain projects directly from source.
 
----
-
 # ✨ Features
 
 - Simple one-command builds
@@ -31,8 +29,6 @@ Originally developed for {Crystal} Bitoreum, `bake` (**b**itoreum m**ake**), can
 - Structured logging for troubleshooting
 
 Bake is designed to remain **transparent and script-driven**, making it easy to understand, modify, and extend.
-
----
 
 # Quick Start
 
@@ -57,8 +53,6 @@ Example:
 
 This will build the selected version using the default configuration defined in the project's `Makefile` and `configure.ac`.
 
----
-
 # Building Other Projects
 
 Bake can also compile other compatible repositories.
@@ -77,8 +71,6 @@ This command will build **Yerbas version 3.1.4.20** from source.
 
 Optional flags may also be used with this syntax.
 
----
-
 # ⚙️ Command Options
 
 ```bash
@@ -94,7 +86,6 @@ Optional flags may also be used with this syntax.
 | `-h` | Display help and usage syntax                       |
 
 For other options that can extend `bake` Toolset functionality please see the [Advanced Usage Guide](docs/advanced-options.md)
----
 
 # 🍳 Bake Toolchain
 
@@ -112,8 +103,6 @@ Bake is composed of several modular tools.
 | **asset_pull.sh** | Library and asset management |
 
 Each component is designed to remain independent while sharing common logic through `kitchen.lib`.
-
----
 
 # Cleaning the Workspace
 
@@ -152,7 +141,6 @@ Example:
 ```bash
 ./sous
 ```
----
 
 # 📜 Logging
 
@@ -171,8 +159,6 @@ Logs include:
 - Compile output
 - Packaging stages
 
----
-
 # 📦 Requirements
 
 Bake is designed for Linux systems.
@@ -189,8 +175,6 @@ Optional but recommended:
 
 - `screen` (for remote build sessions)
 
----
-
 # Contributing
 
 Pull requests and issues are welcome.
@@ -203,8 +187,6 @@ Guidelines:
 - Preserve deterministic build behavior
 
 Please see [**CONTRIBUTING.md**](CONTRIBUTING.md) for full development guidelines.
-
----
 
 # License
 

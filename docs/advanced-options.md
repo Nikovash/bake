@@ -7,7 +7,6 @@ users who want deeper control over the build process.
 Bake is intentionally designed so the **basic workflow remains simple**, while
 advanced users can customize almost every step of the compilation pipeline.
 
----
 
 # Bake Command (Advanced)
 
@@ -32,8 +31,6 @@ This is useful when:
 - Inspecting source before compiling
 - Working in restricted build environments
 
----
-
 # Childe (Target Selection)
 
 The **childe** (named after **Julia Child**), tool allows the user to select compilation targets.
@@ -57,8 +54,6 @@ Some distributions may require additional cross‑compile headers or libraries.
 These requirements vary by system and are outside the scope of this document.
 
 Selections are saved so that future builds use the same targets unless changed.
-
----
 
 # Garnish (Configure Flags)
 
@@ -91,8 +86,6 @@ Future builds will automatically reuse the selected flags unless:
 If no configuration exists, `bake` falls back to the default flags defined in
 `configure.ac`.
 
----
-
 # Full Configuration Mode
 
 ```
@@ -109,8 +102,6 @@ This mode is typically used when:
 - Preparing a new environment
 - Building a project for the first time
 - Changing compilation behavior
-
----
 
 # Dishy (Workspace Management)
 
@@ -146,8 +137,6 @@ Use this option when:
 - testing clean builds
 - preparing reproducible build environments
 
----
-
 # Sous (Maintenance Tool)
 
 The **sous** tool manages the Bake runtime environment.
@@ -167,8 +156,6 @@ Example usage:
 ```bash
 ./sous [-up][-f][-r][-uninstall]
 ```
-
-
 
 | Flag           | Usage                                   |
 | -------------- | --------------------------------------- |
@@ -203,8 +190,6 @@ This command is useful if:
 - required libraries are missing
 - the Bake runtime environment becomes corrupted
 
----
-
 # Build Recovery `formerly refire` [-r]
 
 Build recovery is now handled as a special **Bake** flag.
@@ -228,8 +213,6 @@ This option is helpful when:
 The `-r` flag uses the existing workspace and logs to determine the most
 appropriate point to restart the build process.
 
----
-
 # Logging and Diagnostics
 
 Bake maintains structured logs to assist troubleshooting.
@@ -250,8 +233,6 @@ Logs include:
 
 These logs should always be included when reporting build issues.
 
----
-
 # Toolchain Architecture
 
 The Bake environment is composed of several modular tools.
@@ -269,8 +250,6 @@ The Bake environment is composed of several modular tools.
 
 This modular architecture allows each component to evolve independently while
 maintaining a consistent build workflow.
-
----
 
 # Notes for Advanced Users
 
