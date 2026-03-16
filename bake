@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # ===========================
-# Bake 
+# Bake
 # - Fresh bake:
 #     ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [-c] [-g] [-f] [-o] [-m <label>]
 # - Refire:
@@ -271,12 +271,6 @@ log "On today's menu: $COIN_NAME; Recipe submitted from - $REPO_URL"
 START_EPOCH="$(date +%s)"
 START_HUMAN="$(date +"%Y-%m-%d %H:%M:%S %Z")"
 log "Commercial Bake Start: ${START_HUMAN}"
-
-# --- Temp fallback for flaky depends in v4.1.0.0 ---
-if [[ "$COIN_NAME" == "bitoreum" && "$MODE" == "fresh" && "$BRANCH_OR_TAG" == "v4.1.0.0" ]]; then
-  export FALLBACK_DOWNLOAD_PATH="https://bitoreum.cc/depends/"
-  log "Applied bitoreum.cc fallback for bitoreum-v4.1.0.0"
-fi
 
 # --- Helpers from new architecture ---
 prepare_repo() {

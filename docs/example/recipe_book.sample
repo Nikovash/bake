@@ -1,4 +1,5 @@
-# This is a sample for refference ther format is Arch Target seperated by a comma and a y|n for if the build process will attempt other targets
+# This is a sample for refference
+# The format is Arch Target seperated by a comma and a y|n for if the build process will attempt other targets
 # Further headers may be required for cross-compile depending our your Distro, this is outside the scope of this toolset
 
 Linux 64-bit,y
