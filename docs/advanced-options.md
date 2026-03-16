@@ -147,6 +147,7 @@ Use this option when:
 - preparing reproducible build environments
 
 ---
+
 # Sous (Maintenance Tool)
 
 The **sous** tool manages the Bake runtime environment.
@@ -158,18 +159,23 @@ Typical responsibilities include:
 - removing Bake components
 
 Example usage:
+
 ```bash
-./sous # graphical use
+./sous # whiptail graphical use
 ```
+
 ```bash
 ./sous [-up][-f][-r][-uninstall]
----
-| Flag | Usage |
-| ---- | ----- |
-| **-up** | Update Toolchain |
-| **-f** | Forces the update to the current branch tip |
-| **-r** | Attempts to repair the bake toolchain |
-| **-uninstall** | Uninstalls toolchain |
+```
+
+
+
+| Flag           | Usage                                   |
+| -------------- | --------------------------------------- |
+| **-up**        | Checks/Updates Toolchain                |
+| **-f**         | Forces Update To Current Branch tip     |
+| **-r**         | Attempts to repair the `bake` toolchain |
+| **-uninstall** | Uninstalls toolchain                    |
 
 # First Run (Environment Bootstrap)
 
@@ -184,7 +190,7 @@ Typical responsibilities include:
 
 Example repair run:
 
-```
+```bash
 ./first_run
 ```
 
@@ -205,8 +211,8 @@ Build recovery is now handled as a special **Bake** flag.
 
 Typical usage:
 
-```
-./bake <version-or-tag> [coin-name] -r
+```bash
+./bake [coin-name] -r
 ```
 
 This attempts to resume or recover a failed build by reusing the existing workspace instead of forcing a full rebuild. while **bitoreum** is the defualt you can pass the name of any coin downloaded to the system.

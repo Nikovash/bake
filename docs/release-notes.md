@@ -82,7 +82,7 @@
 - Most scripts should now include a -h flag for basic usage formats
 - 2.x will be the last version where `bakery.sh` `bake.sh` are two seperate functions, in 3x bakery.sh will become `bake.sh`
 
-# Verison3.0rc
+# Verison 3.0rc
 - `fisrt_run` utility has been added
 - All tools have dropped the use of *.sh
 - `refire` & `bakery` have been folded into `bake` 3 tools into one
@@ -94,3 +94,28 @@
 - QT determination was moved from `recipe_book.conf` to `build_flags.list`
 - Dishy has been updated
 - This is an unstable release candidate to test on the release branch
+
+# Version 3.1
+- `bake` Toolset release ver 3.1
+- `sous` bake Toolset Mainter app added
+- `sous` Documentation added
+- fix(asset_pull): prevent kitchen.lib downgrade and use mktemp tempfiles
+- Edited `README.md` for errors, content and readability
+- Added `build_flags.sample`
+- Added achitecture.md
+- Moved sample files to `../bake/docs/example` folder
+- Updated CONTRIBUTING.md
+- Updated LICENSE
+- Updated `faq.md`
+- Updated `cross-compile.md`
+- Updated `troubleshooting.md`
+- Updated advanced-options.md
+- Folded `usage.md` into `advanced-options.md`
+- Removed fallback For BTRM v4.1.0.0 from `bake`
+- Updated `verson.properties`
+
+# Version 3.2
+- Corrected `REACME.md` broken links
+- Updated `release-notes.md` entries
+- Corrected `advanced-options.md`
+- Updated `version.properties`

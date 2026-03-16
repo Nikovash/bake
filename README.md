@@ -5,7 +5,7 @@
 <div align="center">
 <h1>Bake</h1>
   <h2>The Kitchen For Crypto Compiling</h2>
-  <img src="https://img.shields.io/badge/version-3.1-blue">
+  <img src="https://img.shields.io/badge/version-3.2-blue">
   <img src="https://img.shields.io/badge/platform-linux-green">
   <img src="https://img.shields.io/badge/license-MIT-purple">
   <img src="https://img.shields.io/badge/status-active-success">
@@ -93,7 +93,7 @@ Optional flags may also be used with this syntax.
 | `-f` | Run both **childe** and **garnish**                 |
 | `-h` | Display help and usage syntax                       |
 
-For other options that can extend `bake` Toolset functionality please see the [Advanced Usage Guide](advanced-options.md)
+For other options that can extend `bake` Toolset functionality please see the [Advanced Usage Guide](docs/advanced-options.md)
 ---
 
 # 🍳 Bake Toolchain
