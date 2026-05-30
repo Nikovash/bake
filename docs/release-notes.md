@@ -119,3 +119,8 @@
 - Updated `release-notes.md` entries
 - Corrected `advanced-options.md`
 - Updated `version.properties`
+
+# Version 3.3
+- Corrected `refire` behavior
+- Updated `release-notes.md` entries
+- Updated `version.properties`

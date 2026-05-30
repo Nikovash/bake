@@ -5,7 +5,7 @@
 <div align="center">
 <h1>Bake</h1>
   <h2>The Kitchen For Crypto Compiling</h2>
-  <img src="https://img.shields.io/badge/version-3.2-blue">
+  <img src="https://img.shields.io/badge/version-3.3-blue">
   <img src="https://img.shields.io/badge/platform-linux-green">
   <img src="https://img.shields.io/badge/license-MIT-purple">
   <img src="https://img.shields.io/badge/status-active-success">
