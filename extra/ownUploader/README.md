@@ -1,4 +1,4 @@
-# 📤 Upload Utility Script
+# 📤 ownCloud Upload Utility Script
 
 A simple Bash utility to upload compressed build files for either the **Yerbas** or **Bitoreum** project to an ownCloud server using WebDAV.
 
@@ -117,4 +117,4 @@ MIT License – feel free to use and modify.
 
 ---
 
-> Created with ❤️ for Yerbas and Bitoreum build automation.
+> Created with ❤️ for Yerbas and Bitoreum build automations - `bake`

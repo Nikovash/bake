@@ -133,3 +133,4 @@
 - Updated release-notes.md
 - Updated version.properties
 - Updated README.md
+- Moved ownUploader to its own folder in extras

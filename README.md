@@ -58,7 +58,7 @@ This will build the selected version using the default configuration defined in 
 Bake can also compile other compatible repositories.
 
 ```bash
-./bake <version-or-tag> [<coin-name> <github-repo-url>]
+./bake <branch-or-tag> [<coin-name> <github-repo-url>]
 ```
 
 Example:
@@ -74,7 +74,7 @@ Optional flags may also be used with this syntax.
 # ⚙️ Command Options
 
 ```bash
-./bake <version-or-tag> [<coin-name> <github-repo-url>] [-d] [-c] [-g] [-f] [-h]
+./bake <branch-or-tag> [<coin-name> <github-repo-url>] [-d] [-c] [-g] [-f] [-h]
 ```
 
 | Flag | Description                                         |
