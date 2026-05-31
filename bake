@@ -127,9 +127,11 @@ parse_args() {
 
 parse_args "$@"
 
-
 # --- Ensure dishy exists; try to fetch if missing ---
-if [[ -x "${RUN_DIR}/dishy" ]]; then
+#...Fresh mode may wipe/reprep the repo, Refire mode must reuse the existing repo, so skip dishy.
+if [[ "$MODE" == "refire" ]]; then
+  log "Refire mode: skipping dishy."
+elif [[ -x "${RUN_DIR}/dishy" ]]; then
   "${RUN_DIR}/dishy" "$COIN_NAME" || true
 else
   fetched=""
@@ -144,7 +146,6 @@ else
         "https://raw.githubusercontent.com/Nikovash/bake/${ref}/dishy" && fetched="yes" && break || true
     done
   fi
-
   if [[ "${fetched:-}" == "yes" && -s "${RUN_DIR}/dishy" ]]; then
     chmod +x "${RUN_DIR}/dishy"
     "${RUN_DIR}/dishy" "$COIN_NAME" || true

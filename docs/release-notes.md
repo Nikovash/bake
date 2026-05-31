@@ -119,3 +119,18 @@
 - Updated `release-notes.md` entries
 - Corrected `advanced-options.md`
 - Updated `version.properties`
+
+# Version 3.3
+- Corrected refire behavior to properly reuse existing repositories without invoking cleanup operations
+- Fixed a kitchen.lib return-code bug that caused Bake to exit when build_flags.list was absent
+- Bake now correctly falls back to default build behavior when no generated build flags file is present
+- Updated release-notes.md
+- Updated version.properties
+- Updated kitchen.lib to version 1.0.1
+
+# Version 3.4
+- Corrected `sous` update & force update behavior
+- Updated release-notes.md
+- Updated version.properties
+- Updated README.md
+- Moved ownUploader to its own folder in extras

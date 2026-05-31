@@ -40,8 +40,8 @@ Options:
   -h           Show help
 
 Notes:
-  -up compares local HEAD to the upstream branch.
-  If already current, it exits unless -f is supplied.
+  -up refuses to update if local changes are present.
+  -up -f discards local changes and force-syncs to origin/<current-branch>.
 
 If run with no flags and whiptail is installed, Sous opens an interactive menu.
 EOF
@@ -152,6 +152,39 @@ remote_head_commit() {
   git -C "$SCRIPT_DIR" rev-parse "$tracking" 2>/dev/null || return 1
 }
 
+git_tree_dirty() {
+  [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain)" ]]
+}
+
+show_dirty_tree() {
+  warn "Local changes detected:"
+  git -C "$SCRIPT_DIR" status --short
+}
+
+refuse_dirty_update_unless_forced() {
+  if git_tree_dirty && [[ "$FORCE_ACTION" != "yes" ]]; then
+    show_dirty_tree
+    die "Update refused. Commit/stash changes first, or use: ./sous -up -f"
+  fi
+}
+
+force_sync_to_remote() {
+  local branch tracking
+
+  branch="$(current_branch_name)"
+  [[ "$branch" != "HEAD" && "$branch" != "unknown" ]] || die "Cannot force update from detached HEAD."
+
+  tracking="origin/${branch}"
+
+  git -C "$SCRIPT_DIR" rev-parse --verify "$tracking" >/dev/null 2>&1 \
+    || die "Remote tracking branch not found: ${tracking}"
+
+  warn "Force update will discard local changes and untracked files."
+  git -C "$SCRIPT_DIR" reset --hard "$tracking"
+  git -C "$SCRIPT_DIR" clean -fd
+  log "Repository force-synced to ${tracking}"
+}
+
 print_status_header() {
   local bake_ver kitchen_ver branch local_head remote_head
   bake_ver="$(read_bake_version_from_file)"
@@ -187,27 +220,24 @@ update_bake() {
   if [[ "$branch" == "HEAD" || "$branch" == "unknown" ]]; then
     warn "Detached HEAD or unknown branch detected."
     if [[ "$FORCE_ACTION" != "yes" ]]; then
-      warn "Use -up -f to force refresh."
-      return 0
+      die "Use -up -f to force refresh, or checkout a branch first."
     fi
   fi
 
   remote_head="$(remote_head_commit || echo "")"
 
-  if [[ -n "$local_head" && -n "$remote_head" && "$local_head" == "$remote_head" && "$FORCE_ACTION" != "yes" ]]; then
-    log "Bake is already current. No update required."
-    return 0
-  fi
-
   if [[ "$FORCE_ACTION" == "yes" ]]; then
     log "Force update requested."
-  fi
-
-  if [[ "$branch" != "HEAD" && "$branch" != "unknown" ]]; then
-    git -C "$SCRIPT_DIR" pull --rebase || die "git pull failed"
-    log "Repository updated on branch: ${branch}"
+    force_sync_to_remote
   else
-    warn "Skipping git pull due to detached HEAD; continuing with local refresh only."
+    refuse_dirty_update_unless_forced
+
+    if [[ -n "$local_head" && -n "$remote_head" && "$local_head" == "$remote_head" ]]; then
+      log "Bake is already current. No update required."
+    else
+      git -C "$SCRIPT_DIR" pull --rebase || die "git pull failed"
+      log "Repository updated on branch: ${branch}"
+    fi
   fi
 
   refresh_kitchen_to_opt
