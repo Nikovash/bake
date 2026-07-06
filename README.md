@@ -126,7 +126,7 @@ Bake can build other compatible repositories by supplying a coin/project name an
 Example:
 
 ```bash
-./bake v3.1.4.20 yerbas https://github.com/The-Yerbas-Endeavor/Yerbas
+./bake v3.2.0.15 yerbas https://github.com/The-Yerbas-Endeavor/Yerbas
 ```
 
 This prepares or updates a local source tree for `yerbas`, checks out the requested branch or tag, builds enabled targets, packages artifacts, and writes logs.
