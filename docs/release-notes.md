@@ -84,7 +84,7 @@
 
 # Verison 3.0rc
 - `fisrt_run` utility has been added
-- All tools have dropped the use of *.sh
+- All tools have dropped the use of `*.sh`
 - `refire` & `bakery` have been folded into `bake` 3 tools into one
 - `childe` is a new tool that allows users to graphicaly choose Arch_type builds
 - `garnish` is a new tool that allows user to graphically chose build flags
@@ -134,3 +134,18 @@
 - Updated version.properties
 - Updated README.md
 - Moved ownUploader to its own folder in extras
+
+# Version 3.5
+- Added automatic Bake runtime bootstrap. If `first_run` has not been run manually, `bake` now runs it automatically before continuing
+- Added cleanup of stale `first_run` installers once the Bake runtime is ready
+- Added host platform validation. Bake now exits cleanly on unsupported hosts before attempting Linux-specific setup
+- Scoped supported hosts to apt/dpkg Debian-family Linux systems, including Debian, Ubuntu, Mint, and compatible apt-based clones
+- Added `--depends-only` mode for validating dependency toolchains without compiling or packaging the target project
+- Added `bake depends <branch_or_tag>` as an alias for depends-only builds
+- Improved depends cleanup reporting with clearer log output, affected paths, and reclaimed-space summaries.
+- Added `--keep-failed-depends` / `--preserve-failed-depends` for troubleshooting failed dependency builds
+- Clarified `-d` as download/check-only mode and separated it from `--depends-only`
+- Updated `./bake -h` output and README documentation for the new 3.5 workflow
+- Native macOS and native Windows hosts remain unsupported by this Bake path
+- Windows cross-compile targets remain supported from a supported Linux host
+- Fedora, Arch, openSUSE, Alpine, and other non-apt Linux hosts now exit with a clear unsupported-host message

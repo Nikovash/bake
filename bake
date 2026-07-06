@@ -4,14 +4,20 @@ set -Eeuo pipefail
 # ===========================
 # Bake
 # - Fresh bake:
-#     ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [-c] [-g] [-f] [-o] [-m <label>]
+#     ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [--depends-only] [--keep-failed-depends|--preserve-failed-depends] [-c] [-g] [-f] [-o] [-m <label>]
+# - Depends-only bake:
+#     ./bake <branch_or_tag> [<coin_name> <repo_url>] --depends-only
+#     ./bake depends <branch_or_tag> [<coin_name> <repo_url>]
 # - Refire:
-#     ./bake -r <coin_name> [-d] [-c] [-g] [-f] [-o] [-m <label>]
+#     ./bake -r <coin_name> [-d] [--depends-only] [--keep-failed-depends|--preserve-failed-depends] [-c] [-g] [-f] [-o] [-m <label>]
 # - Uses recipe_book.conf (target matrix)
 # - Uses build_flags.list (configure / NO_QT flags)
 # - One-time repo clone/update for fresh mode
 # - Refire reuses existing local repo
+# - Download-only mode stops after repo preparation
+# - Depends-only mode stops after dependency toolchain builds
 # - Cleans depends & main between bakes
+# - Can preserve failed dependency artifacts for troubleshooting
 # - Release-only builds (stripped)
 # - Artifacts in special-delivery
 # - bakery.log: only [INFO]/[ERROR] entries
@@ -35,28 +41,162 @@ usage() {
   cat <<'EOF'
 Usage:
   Fresh bake:
-    ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [-c] [-g] [-f] [-o] [-m <label>]
+    ./bake <branch_or_tag> [<coin_name> <repo_url>] [-d] [--depends-only] [--keep-failed-depends|--preserve-failed-depends] [-c] [-g] [-f] [-o] [-m <label>]
+
+  Depends-only bake:
+    ./bake <branch_or_tag> [<coin_name> <repo_url>] --depends-only
+    ./bake depends <branch_or_tag> [<coin_name> <repo_url>]
 
   Refire:
-    ./bake -r <coin_name> [-d] [-c] [-g] [-f] [-o] [-m <label>]
+    ./bake -r <coin_name> [-d] [--depends-only] [--keep-failed-depends|--preserve-failed-depends] [-c] [-g] [-f] [-o] [-m <label>]
 
-Flags:
-  -d           Download/check only; do not build
+Modes / Flags:
+  -d           Download/check only; prepare or update repo, then exit without building
+  --depends-only
+               Build dependency toolchains only; skip target project compile/package
+  depends      Alias prefix for --depends-only, e.g. ./bake depends <branch_or_tag>
+
+  --keep-failed-depends, --preserve-failed-depends
+               Skip depends cleanup before rebuilding so failed dependency artifacts can be inspected
+
   -c           Run childe before build/refire
   -g           Run garnish before build/refire
   -f           Run both childe and garnish
   -o           Allow Oracle Ampere ARM to honor GUI flags
   -r           Refire mode for an already-downloaded local coin
   -m <label>   Replace Release in archive names with a custom label
-  -h           Show this help
+  -h, --help   Show this help
+
+Notes:
+  -d and --depends-only cannot be used together.
 EOF
 }
 
-# --- Bootstrap kitchen runtime ---
+unsupported_host() {
+  local detected="$1"
+  local line1="$2"
+  local line2="$3"
+  local line3="$4"
+
+  cat >&2 <<EOF
+
+--------------------------------------------------
+Unsupported Bake Host
+
+Detected Host: ${detected}
+
+${line1}
+
+${line2}
+
+${line3}
+
+Supported host class:
+- Debian / Ubuntu / Linux Mint style Linux
+- apt-get + dpkg available by default
+
+Notes:
+- Windows cross-compile targets are supported from a supported Linux host.
+- Native Windows hosts are not supported.
+- macOS/Darwin hosts are not supported by this Bake path.
+--------------------------------------------------
+
+EOF
+
+  log "Unsupported host: ${detected}"
+  exit 1
+}
+
+assert_supported_apt_linux_host() {
+  local distro_label="Linux"
+
+  if [[ -f /etc/os-release ]]; then
+    local NAME= ID= ID_LIKE= PRETTY_NAME= VERSION_ID=
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    distro_label="${PRETTY_NAME:-${NAME:-Linux}}"
+  fi
+
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+    log "Supported Bake host detected: ${distro_label}"
+    return 0
+  fi
+
+  unsupported_host "$distro_label" \
+    "This appears to be Linux, but it is not an apt/dpkg host." \
+    "Bake currently targets Debian/Ubuntu/Linux Mint-style hosts and package names." \
+    "Use Debian, Ubuntu, Linux Mint, an apt-based clone, a VM/container, or GitHub Actions."
+}
+
+assert_supported_host() {
+  local kernel
+  kernel="$(uname -s 2>/dev/null || echo unknown)"
+
+  case "$kernel" in
+    Linux)
+      assert_supported_apt_linux_host
+      ;;
+    Darwin)
+      unsupported_host "macOS (Darwin)" \
+        "Bake currently supports apt-based Debian/Ubuntu/Linux Mint-style Linux hosts only." \
+        "macOS uses a different toolchain model, including Clang and Homebrew, and is outside this Bake path." \
+        "Use GitHub Actions, a supported Linux VM/container, or future apple-bake."
+      ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      unsupported_host "native Windows (${kernel})" \
+        "Bake does not support native Windows hosts." \
+        "Windows targets should be built from a supported Linux host using cross-compilation." \
+        "Use Debian/Ubuntu/Linux Mint-style Linux, WSL with apt/dpkg, or GitHub Actions."
+      ;;
+    *)
+      unsupported_host "$kernel" \
+        "Bake currently supports apt-based Debian/Ubuntu/Linux Mint-style Linux hosts only." \
+        "This host platform is not recognized as supported." \
+        "Use a supported Linux environment or GitHub Actions."
+      ;;
+  esac
+}
+
+assert_supported_host
+
+# --- Bootstrap Bake runtime ---
 ASSET_PULL="${SCRIPT_DIR}/assets/asset_pull.sh"
+FIRST_RUN_APP="${SCRIPT_DIR}/first_run"
+BAKE_INFO="/opt/bake/bake.info"
 OPT_KITCHEN_LIB="/opt/bake/kitchen.lib"
+BAKE_AUTO_RAN_FIRST_RUN="no"
+
+run_bake_first_run_if_needed() {
+  if [[ -f "$BAKE_INFO" && -f "$OPT_KITCHEN_LIB" ]]; then
+    return 0
+  fi
+
+  log "Bake runtime missing; running first_run..."
+
+  [[ -x "$FIRST_RUN_APP" ]] || die "Missing or not executable: ${FIRST_RUN_APP}"
+
+  "$FIRST_RUN_APP" || die "first_run failed."
+
+  [[ -f "$BAKE_INFO" ]] || die "first_run completed but did not create ${BAKE_INFO}"
+  [[ -f "$OPT_KITCHEN_LIB" ]] || die "first_run completed but did not install ${OPT_KITCHEN_LIB}"
+
+  BAKE_AUTO_RAN_FIRST_RUN="yes"
+
+  log "Bake first_run completed."
+}
+
+cleanup_first_run_if_runtime_ready() {
+  if [[ -f "$BAKE_INFO" && -f "$OPT_KITCHEN_LIB" && -f "$FIRST_RUN_APP" ]]; then
+    log "Bake runtime ready; removing first_run installer."
+    rm -f "$FIRST_RUN_APP"
+  fi
+}
 
 [[ -f "$ASSET_PULL" ]] || die "Missing ${ASSET_PULL}"
+[[ -f "${SCRIPT_DIR}/assets/kitchen.lib" ]] || die "Missing ${SCRIPT_DIR}/assets/kitchen.lib"
+
+run_bake_first_run_if_needed
+cleanup_first_run_if_runtime_ready
 
 # shellcheck disable=SC1090
 source "$ASSET_PULL"
@@ -70,6 +210,8 @@ source "$OPT_KITCHEN_LIB"
 # --- Defaults ---
 MODE="fresh"                    # fresh | refire
 DOWNLOAD_ONLY="no"
+DEPENDS_ONLY="no"
+KEEP_FAILED_DEPENDS="no"
 USE_CHILDE="no"
 USE_GARNISH="no"
 ORACLE_GUI_OVERRIDE="no"
@@ -85,9 +227,16 @@ RELEASE_SUFFIX="Release"
 parse_args() {
   local positionals=()
 
+  if [[ "${1:-}" == "depends" ]]; then
+    DEPENDS_ONLY="yes"
+    shift
+  fi
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -d) DOWNLOAD_ONLY="yes" ;;
+      --depends-only) DEPENDS_ONLY="yes" ;;
+      --keep-failed-depends|--preserve-failed-depends) KEEP_FAILED_DEPENDS="yes" ;;
       -c) USE_CHILDE="yes" ;;
       -g) USE_GARNISH="yes" ;;
       -f) USE_CHILDE="yes"; USE_GARNISH="yes" ;;
@@ -107,6 +256,10 @@ parse_args() {
   done
 
   [[ -n "$MOD_LABEL" ]] && RELEASE_SUFFIX="$MOD_LABEL"
+
+  if [[ "$DOWNLOAD_ONLY" == "yes" && "$DEPENDS_ONLY" == "yes" ]]; then
+    die "-d and --depends-only cannot be used together."
+  fi
 
   if [[ "$MODE" == "refire" ]]; then
     [[ "${#positionals[@]}" -ge 1 ]] || die "Refire mode requires a coin name: ./bake -r <coin_name>"
@@ -180,9 +333,6 @@ if [[ -f "$VERSION_FILE" ]]; then
   BAKE_VERSION="${BAKE_VERSION//,/\.}"
 fi
 
-# --- Build info file ---
-BAKE_INFO="/opt/bake/bake.info"
-
 # --- Build run logs config ---
 LOG_ROOT="${RUN_DIR}/run-logs/${COIN_NAME}"
 BUILD_LOG="${LOG_ROOT}/build"
@@ -198,8 +348,8 @@ reset_logs() {
 
 reset_logs "$BUILD_LOG" "$BUILD_DEPENDS_LOG"
 
-# --- Determine if first-run ---
-if [[ ! -f "$BAKE_INFO" ]]; then
+# --- Determine if this Bake invocation performed first_run setup ---
+if [[ "$BAKE_AUTO_RAN_FIRST_RUN" == "yes" ]]; then
   FIRST_RUN=true
 else
   FIRST_RUN=false
@@ -215,23 +365,16 @@ ensure_system_packages() {
   fi
 
   sudo mkdir -p /opt/bake
+  
+  bake_set BAKE_VERSION "$BAKE_VERSION"
+  bake_set SCRIPT_INSTALL "$RUN_DIR"
 
   if [[ "$FIRST_RUN" == true ]]; then
-    sudo tee "$BAKE_INFO" > /dev/null <<EOF
-# Bake configuration
-BAKE_VERSION=$BAKE_VERSION
-SCRIPT_INSTALL=${RUN_DIR}
-EOF
-    log "Configuration file created at $BAKE_INFO"
+    log "Bake first-run metadata updated at $BAKE_INFO"
     sudo apt update
     sudo apt dist-upgrade -y
   else
-    sudo tee "$BAKE_INFO" > /dev/null <<EOF
-# Bake configuration
-BAKE_VERSION=$BAKE_VERSION
-SCRIPT_INSTALL=$RUN_DIR
-EOF
-    log "Bake version & Run_Dir has been updated"
+    log "Bake version & Run_Dir have been updated"
     sudo apt update
   fi
 
@@ -378,6 +521,109 @@ gui_is_disabled_for_target() {
   return 1
 }
 
+path_size_kib() {
+  local path="$1"
+
+  if [[ ! -e "$path" ]]; then
+    echo 0
+    return 0
+  fi
+
+  du -sk "$path" 2>/dev/null | awk '{print $1}' || echo 0
+}
+
+human_kib() {
+  local kib="${1:-0}"
+
+  awk -v kib="$kib" '
+    BEGIN {
+      bytes = kib * 1024;
+      split("B KiB MiB GiB TiB", unit, " ");
+      value = bytes;
+      idx = 1;
+      while (value >= 1024 && idx < 5) {
+        value = value / 1024;
+        idx++;
+      }
+      if (idx == 1) {
+        printf "%d %s", value, unit[idx];
+      } else {
+        printf "%.1f %s", value, unit[idx];
+      }
+    }
+  '
+}
+
+log_depends_cleanup_path() {
+  local path="$1"
+
+  if [[ -e "$path" ]]; then
+    log "       ${path}"
+  fi
+}
+
+run_depends_cleanup() {
+  local friendly="$1"
+  local host="$2"
+  local before_kib after_kib reclaimed_kib
+
+  if [[ "$KEEP_FAILED_DEPENDS" == "yes" ]]; then
+    log "Depends cleanup skipped by user request: ${friendly} (${host})"
+    log "Preserving dependency artifacts for inspection."
+    log "Preserved paths, when present:"
+    log_depends_cleanup_path "${DEPENDSDIR}/work"
+    log_depends_cleanup_path "${DEPENDSDIR}/built"
+    log_depends_cleanup_path "${DEPENDSDIR}/${host}"
+    log_depends_cleanup_path "${DEPENDSDIR}/work/build/${host}"
+    log_depends_cleanup_path "${DEPENDSDIR}/work/staging/${host}"
+    return 0
+  fi
+
+  before_kib="$(path_size_kib "$DEPENDSDIR")"
+
+  log "Cleaning dependency work directories automatically: ${friendly} (${host})"
+  log "Depends cleanup root: ${DEPENDSDIR}"
+  log "Cleanup commands: make clean; make distclean"
+  log "Paths that may be removed or regenerated:"
+  log_depends_cleanup_path "${DEPENDSDIR}/work"
+  log_depends_cleanup_path "${DEPENDSDIR}/built"
+  log_depends_cleanup_path "${DEPENDSDIR}/${host}"
+  log_depends_cleanup_path "${DEPENDSDIR}/work/build/${host}"
+  log_depends_cleanup_path "${DEPENDSDIR}/work/staging/${host}"
+
+  make clean || log "Depends cleanup warning: make clean returned non-zero; continuing."
+  make distclean || log "Depends cleanup warning: make distclean returned non-zero; continuing."
+
+  after_kib="$(path_size_kib "$DEPENDSDIR")"
+  reclaimed_kib=$(( before_kib > after_kib ? before_kib - after_kib : 0 ))
+
+  if (( reclaimed_kib > 0 )); then
+    log "Depends cleanup reclaimed: $(human_kib "$reclaimed_kib")"
+  else
+    log "Depends cleanup reclaimed: 0 B (no measurable reduction)"
+  fi
+}
+
+log_depends_failure_artifacts() {
+  local friendly="$1"
+  local host="$2"
+  local tag="$3"
+
+  log "Dependency build failed: ${friendly} (${host})"
+  log "Preserving dependency build artifacts for inspection."
+  log "Depends root:"
+  log "       ${DEPENDSDIR}"
+  log "Depends build log:"
+  log "       ${BUILD_DEPENDS_LOG}/${tag}.main.log"
+  log "Likely inspection paths, when present:"
+  log_depends_cleanup_path "${DEPENDSDIR}/work"
+  log_depends_cleanup_path "${DEPENDSDIR}/built"
+  log_depends_cleanup_path "${DEPENDSDIR}/${host}"
+  log_depends_cleanup_path "${DEPENDSDIR}/work/build/${host}"
+  log_depends_cleanup_path "${DEPENDSDIR}/work/staging/${host}"
+  log "Next run cleans dependency work automatically unless --keep-failed-depends is used."
+}
+
 # --- Build a single target (Release-only) ---
 build_target() {
   local friendly="$1" host="$2" is_pi="$3" is_amp="$4" is_win="$5"
@@ -415,10 +661,10 @@ build_target() {
   # --- Depends clean & rebuild ---
   pushd "$DEPENDSDIR" >/dev/null
   did_push_dep=1
-  make clean || true
-  make distclean || true
+  run_depends_cleanup "$friendly" "$host"
   make -j"$(nproc)" HOST="$host" "${target_depends_flags[@]}" 2>&1 | tee "${BUILD_DEPENDS_LOG}/${tag}.main.log" || {
     err "depends build failed: ${friendly} (${host})"
+    log_depends_failure_artifacts "$friendly" "$host" "$tag"
     return 1
   }
   for t in error warning fail; do
@@ -426,6 +672,11 @@ build_target() {
   done
   popd >/dev/null
   did_push_dep=0
+
+  if [[ "$DEPENDS_ONLY" == "yes" ]]; then
+    log "Depends-only build passed: ${friendly} (${host})"
+    return 0
+  fi
 
   # --- Main clean, autogen, configure, build ---
   pushd "$REPO_ROOT" >/dev/null
@@ -543,6 +794,8 @@ fi
 # --- Main flow ---
 log "bake batch start"
 log "Mode: ${MODE}"
+log "Depends only: ${DEPENDS_ONLY}"
+log "Keep failed depends: ${KEEP_FAILED_DEPENDS}"
 log "Coin: ${COIN_NAME}"
 
 if [[ "$MODE" == "fresh" ]]; then
@@ -600,6 +853,20 @@ while IFS= read -r friendly; do
     break
   }
 done < <(read_enabled_recipe_targets "$RECIPE_BOOK")
+
+if [[ "$DEPENDS_ONLY" == "yes" ]]; then
+  log "Depends-only mode complete. Dependency toolchains built successfully for enabled targets."
+  if declare -F bake_set >/dev/null 2>&1; then
+    bake_set LAST_APP bake || true
+    bake_set LAST_RUN "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" || true
+    bake_set LAST_BRANCH_OR_TAG "$BRANCH_OR_TAG" || true
+    bake_set LAST_COIN_NAME "$COIN_NAME" || true
+    bake_set LAST_REPO_URL "$REPO_URL" || true
+    bake_set LAST_REPO_ROOT "$REPO_ROOT" || true
+    bake_set LAST_BUILD_MODE "${MODE}-depends-only" || true
+  fi
+  exit 0
+fi
 
 # --- Final global checksums (for everything in special-delivery) ---
 GLOBAL_SUM="${SPECIAL_DELIVERY}/checksums-${VERSION}.txt"
